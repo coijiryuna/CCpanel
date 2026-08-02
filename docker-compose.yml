@@ -1,0 +1,23 @@
+services:
+  ccpanel:
+    build: .
+    image: ccpanel:latest
+    container_name: ccpanel
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    environment:
+      PANEL_PASSWORD: ${PANEL_PASSWORD:?set PANEL_PASSWORD di .env}
+      PANEL_JWT_SECRET: ${PANEL_JWT_SECRET:?set PANEL_JWT_SECRET di .env}
+      CCPANEL_CERTBOT_EMAIL: ${CCPANEL_CERTBOT_EMAIL:-}
+    volumes:
+      - ccpanel-data:/opt/ccpanel/data
+      - ccpanel-www:/www/wwwroot
+      - ccpanel-trash:/www/trash
+      - ccpanel-le:/etc/letsencrypt
+
+volumes:
+  ccpanel-data:
+  ccpanel-www:
+  ccpanel-trash:
+  ccpanel-le:

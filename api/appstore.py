@@ -1,0 +1,33 @@
+"""API App Store: katalog runtime + aplikasi pendukung, install/uninstall."""
+from __future__ import annotations
+
+from fastapi import Depends, HTTPException
+
+from core import appstore as store
+
+from .deps import _log, app, get_db, require_auth
+
+
+@app.get("/api/appstore")
+def appstore_list(_=Depends(require_auth), db=Depends(get_db)):
+    return {"ok": True, "items": store.list_catalog()}
+
+
+@app.post("/api/appstore/{item_id}/install")
+def appstore_install(item_id: str, _=Depends(require_auth), db=Depends(get_db)):
+    try:
+        res = store.install(item_id)
+    except store.AppStoreError as e:
+        raise HTTPException(400, str(e))
+    _log(db, "appstore", f"install {item_id}")
+    return res
+
+
+@app.post("/api/appstore/{item_id}/uninstall")
+def appstore_uninstall(item_id: str, _=Depends(require_auth), db=Depends(get_db)):
+    try:
+        res = store.uninstall(item_id)
+    except store.AppStoreError as e:
+        raise HTTPException(400, str(e))
+    _log(db, "appstore", f"uninstall {item_id}")
+    return res

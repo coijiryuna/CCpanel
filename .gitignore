@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Data (SQLite + secret)
+data/
+*.db
+
+# Env
+.env
+
+# Node / frontend
+node_modules/
+frontend/dist/
+
+# Go
+cli/ccpanel/ccpanel

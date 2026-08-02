@@ -1,0 +1,424 @@
+"""API sites: CRUD website, enable/disable, WAF, PHP version, project type,
+multi-domain, proxy penuh."""
+from __future__ import annotations
+
+import secrets
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import Depends, HTTPException
+from pydantic import BaseModel
+
+from core import php as php_ops
+from core import validate
+from core import waf as waf_ops
+from core import webserver as webserver_ops
+
+from .deps import _log, app, check_site_access, get_db, require_auth
+
+PROJECT_TYPES = ["static", "php", "node", "python", "go", "docker"]
+
+class SiteCreate(BaseModel):
+    domain: str
+    project_type: str = "static"
+    port: int = 0
+    extra_domains: list[str] = []
+    apply_ssl: bool = False
+    description: str = ""
+    category: str = ""
+    php_version: str = "static"
+    create_ftp: bool = False
+    ftp_username: str = ""
+    create_db: bool = False
+    db_name: str = ""
+    db_user: str = ""
+    db_pass: str = ""
+
+class DomainAdd(BaseModel):
+    domain: str
+
+class SiteResponse(BaseModel):
+    id: int
+    domain: str
+    root_path: str
+    vhost_path: str
+    enabled: bool
+    waf_enabled: bool
+    webserver: str
+    php_version: str
+    project_type: str
+    port: int
+    proxy_enabled: bool
+    extra_domains: list[str] = []
+    description: str = ""
+    category: str = ""
+    created_at: str
+    app: dict | None = None
+
+def _site_row(row, conn=None) -> SiteResponse:
+    extra = []
+    if conn is not None:
+        extra = [
+            r["domain"]
+            for r in conn.execute("SELECT domain FROM site_domains WHERE site_id = ?", (row["id"],)).fetchall()
+        ]
+    return SiteResponse(
+        id=row["id"],
+        domain=row["domain"],
+        root_path=row["root_path"],
+        vhost_path=row["vhost_path"],
+        enabled=bool(row["enabled"]),
+        waf_enabled=bool(row["waf_enabled"]),
+        webserver=row["webserver"] if "webserver" in row.keys() else "nginx",
+        php_version=row["php_version"] if "php_version" in row.keys() else "static",
+        project_type=row["project_type"] if "project_type" in row.keys() else "static",
+        port=row["port"] if "port" in row.keys() else 0,
+        proxy_enabled=bool(row["proxy_enabled"]) if "proxy_enabled" in row.keys() else False,
+        extra_domains=extra,
+        description=row["description"] if "description" in row.keys() else "",
+        category=row["category"] if "category" in row.keys() else "",
+        created_at=row["created_at"],
+    )
+
+@app.delete("/api/sites/{site_id}")
+def delete_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
+    """Hapus vhost + pindah folder ke trash. Bukan hapus permanen."""
+    from core import apps as apps_ops
+    from core import php as php_ops
+
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        eng = webserver_ops.for_engine(row["webserver"])
+        try:
+            eng.remove_site(row["domain"])
+            # hapus pool php-fpm + block fastcgi kalau site pakai PHP
+            if row["php_version"] != "static":
+                php_ops.remove_pool(row["domain"], row["php_version"])
+                php_ops.remove_php_block(row["domain"], Path(row["vhost_path"]))
+            # hapus app runner kalau ada (systemd unit / docker compose)
+            app = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (site_id,)).fetchone()
+            if app is not None:
+                apps_ops.remove_app(row["domain"], Path(row["root_path"]), app["app_type"])
+        except (webserver_ops.WebserverError, php_ops.PhpError, apps_ops.AppError) as e:
+            raise HTTPException(500, str(e)) from e
+        conn.execute("DELETE FROM sites WHERE id = ?", (site_id,))
+        _log(conn, user, "site.delete", row["domain"])
+    return {"ok": True, "trashed": True}
+
+@app.post("/api/sites", response_model=SiteResponse)
+def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResponse:
+    from core import cert as cert_ops
+    from core import database as database_ops
+    from core import ftp as ftp_ops
+
+    domain = req.domain.strip().lower()
+    if not validate.valid_domain(domain):
+        raise HTTPException(400, "Domain tidak valid")
+    ptype = (req.project_type or "static").lower()
+    if ptype not in PROJECT_TYPES:
+        raise HTTPException(400, f"Tipe proyek tidak valid. Pilihan: {', '.join(PROJECT_TYPES)}")
+    port = req.port or 0
+    if port and not 1 <= port <= 65535:
+        raise HTTPException(400, "Port tidak valid")
+    extra = [d.strip().lower() for d in (req.extra_domains or []) if d and d.strip()]
+    for d in extra:
+        if not validate.valid_domain(d):
+            raise HTTPException(400, f"Domain tambahan tidak valid: {d}")
+    if domain in extra:
+        extra.remove(domain)
+    # php version hanya relevan utk project type php
+    php_version = req.php_version or "static"
+    if ptype != "php":
+        php_version = "static"
+    if php_version != "static" and php_version not in php_ops.PHP_VERSIONS:
+        raise HTTPException(400, f"PHP version tidak valid. Pilihan: {', '.join(php_ops.PHP_VERSIONS)}")
+    description = (req.description or "").strip()
+    category = (req.category or "").strip()
+
+    with get_db() as conn:
+        if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone():
+            raise HTTPException(409, "Domain sudah ada")
+        for d in extra:
+            if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (d,)).fetchone():
+                raise HTTPException(409, f"Domain tambahan sudah dipakai situs lain: {d}")
+        try:
+            root = webserver_ops.create_site(domain)
+        except webserver_ops.WebserverError as e:
+            raise HTTPException(500, str(e)) from e
+
+        # FTP + DB harus dibuat SEBELUM insert site (butuh site_id utk FK)
+        site_id = None
+        ftp_created = None
+        db_created = None
+        try:
+            if extra:
+                webserver_ops.nginx_set_server_names(domain, [domain] + extra)
+            # insert site dulu supaya punya site_id
+            cur = conn.execute(
+                "INSERT INTO sites (domain, root_path, vhost_path, enabled, owner_id, webserver, php_version, project_type, port, proxy_enabled, description, category, created_at) "
+                "VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                (domain, str(root), str(webserver_ops.vhost_path(domain)),
+                 None if user["role"] == "admin" else user["id"],
+                 webserver_ops.ACTIVE, php_version, ptype, port,
+                 description, category,
+                 datetime.now(timezone.utc).isoformat()),
+            )
+            site_id = cur.lastrowid
+            for d in extra:
+                conn.execute("INSERT INTO site_domains (site_id, domain) VALUES (?, ?)", (site_id, d))
+            if php_version != "static":
+                php_ops.create_pool(domain, php_version)
+                php_ops.insert_php_block(domain, php_version, Path(webserver_ops.vhost_path(domain)))
+            if req.create_ftp:
+                username = (req.ftp_username or "").strip() or domain.split(".")[0]
+                ftp_created = ftp_ops.create_account(username, "", site_id)
+                conn.execute(
+                    "INSERT INTO ftp_accounts (site_id, username, password, created_at) VALUES (?, ?, ?, ?)",
+                    (site_id, username, ftp_created, datetime.now(timezone.utc).isoformat()),
+                )
+            if req.create_db:
+                db_name = (req.db_name or "").strip().lower() or domain.replace(".", "_")
+                db_user = (req.db_user or "").strip().lower() or db_name
+                if not validate.valid_db_name(db_name):
+                    raise HTTPException(400, "Nama DB tidak valid (a-z, 0-9, _, max 64)")
+                if not validate.valid_db_name(db_user):
+                    raise HTTPException(400, "Username DB tidak valid (a-z, 0-9, _, max 64)")
+                db_pass = (req.db_pass or "").strip() or secrets.token_urlsafe(12)
+                if conn.execute("SELECT 1 FROM dbs WHERE db_name = ?", (db_name,)).fetchone():
+                    raise HTTPException(409, "Nama DB sudah dipakai")
+                database_ops.for_engine("mysql").create_db(db_name, db_user, db_pass, "localhost")
+                conn.execute(
+                    "INSERT INTO dbs (site_id, db_name, db_user, db_pass, db_host, db_type, owner_id, created_at) "
+                    "VALUES (?, ?, ?, ?, 'localhost', 'mysql', ?, ?)",
+                    (site_id, db_name, db_user, db_pass,
+                     None if user["role"] == "admin" else user["id"],
+                     datetime.now(timezone.utc).isoformat()),
+                )
+                db_created = (db_name, db_user, db_pass)
+            if req.apply_ssl:
+                cert_ops.install_ssl(domain, [domain] + extra)
+            _log(conn, user, "site.create", domain + (f" +{len(extra)} alias" if extra else ""))
+            row = conn.execute("SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
+        except Exception as e:
+            # rollback: urut terbalik dari create
+            if site_id is not None:
+                conn.execute("DELETE FROM sites WHERE id = ?", (site_id,))
+                conn.execute("DELETE FROM site_domains WHERE site_id = ?", (site_id,))
+                conn.execute("DELETE FROM ftp_accounts WHERE site_id = ?", (site_id,))
+                conn.execute("DELETE FROM dbs WHERE site_id = ?", (site_id,))
+            if ftp_created:
+                try:
+                    ftp_ops.delete_account(req.ftp_username.strip() or domain.split(".")[0])
+                except Exception:
+                    pass
+            if db_created:
+                try:
+                    database_ops.for_engine("mysql").drop_db(db_created[0], db_created[1], "localhost")
+                except Exception:
+                    pass
+            if php_version != "static":
+                try:
+                    php_ops.remove_pool(domain, php_version)
+                    php_ops.remove_php_block(domain, Path(webserver_ops.vhost_path(domain)))
+                except Exception:
+                    pass
+            try:
+                webserver_ops.remove_site(domain)
+            except Exception:
+                pass
+            if isinstance(e, HTTPException):
+                raise
+            raise HTTPException(500, str(e)) from e
+        return _site_row(row, conn)
+
+@app.get("/api/php/versions")
+def php_versions(user: dict = Depends(require_auth)) -> dict:
+    return {"versions": ["static"] + php_ops.PHP_VERSIONS}
+
+@app.get("/api/sites", response_model=list[SiteResponse])
+def list_sites(user: dict = Depends(require_auth)) -> list[SiteResponse]:
+    from .deps import app_state
+
+    with get_db() as conn:
+        if user["role"] == "admin":
+            rows = conn.execute("SELECT * FROM sites ORDER BY id").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM sites WHERE owner_id = ? ORDER BY id", (user["id"],)
+            ).fetchall()
+        out = []
+        for r in rows:
+            sr = _site_row(r, conn)
+            app = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (r["id"],)).fetchone()
+            if app is not None:
+                sr.app = {
+                    "id": app["id"], "app_type": app["app_type"], "port": app["port"],
+                    "entry": app["entry"], "subpath": app["subpath"],
+                    "state": app_state(r["domain"], r["root_path"], app["app_type"]),
+                }
+            out.append(sr)
+    return out
+
+@app.post("/api/sites/{site_id}/enable")
+def enable_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
+    return _set_enabled(site_id, True, user)
+
+@app.post("/api/sites/{site_id}/disable")
+def disable_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
+    return _set_enabled(site_id, False, user)
+
+def _set_enabled(site_id: int, enabled: bool, user: dict) -> dict:
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        eng = webserver_ops.for_engine(row["webserver"])
+        try:
+            eng.set_enabled(row["domain"], enabled)
+        except webserver_ops.WebserverError as e:
+            raise HTTPException(500, str(e)) from e
+        conn.execute("UPDATE sites SET enabled = ? WHERE id = ?", (int(enabled), site_id))
+        _log(conn, user, "site.enable" if enabled else "site.disable", row["domain"])
+    return {"ok": True, "enabled": enabled}
+
+@app.post("/api/sites/{site_id}/waf")
+def waf_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
+    """Toggle WAF per-site. Khusus engine nginx (rules `if` nginx)."""
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["webserver"] != "nginx":
+            raise HTTPException(400, f"WAF hanya untuk site nginx (site ini: {row['webserver']})")
+        vhost = Path(row["vhost_path"])
+        enabled = not bool(row["waf_enabled"])
+        try:
+            (waf_ops.enable if enabled else waf_ops.disable)(row["domain"], vhost)
+            webserver_ops.for_engine("nginx").nginx_test()
+        except webserver_ops.WebserverError as e:
+            raise HTTPException(500, str(e)) from e
+        conn.execute("UPDATE sites SET waf_enabled = ? WHERE id = ?", (int(enabled), site_id))
+        _log(conn, user, "waf.enable" if enabled else "waf.disable", row["domain"])
+    webserver_ops.for_engine("nginx").nginx_reload()
+    return {"ok": True, "waf_enabled": enabled}
+
+class SitePhpUpdate(BaseModel):
+    php_version: str
+
+@app.put("/api/sites/{site_id}/php")
+def update_site_php(site_id: int, req: SitePhpUpdate, user: dict = Depends(require_auth)) -> dict:
+    """Update PHP version for a site. Valid values: static, php8.1, php8.2, php8.3"""
+    valid_versions = ["static"] + php_ops.PHP_VERSIONS
+    if req.php_version not in valid_versions:
+        raise HTTPException(400, f"PHP version tidak valid. Pilihan: {', '.join(valid_versions)}")
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["webserver"] != "nginx":
+            raise HTTPException(400, f"PHP hanya untuk site nginx (site ini: {row['webserver']})")
+        old_version = row["php_version"]
+        try:
+            php_ops.set_php_version(row["domain"], old_version, req.php_version, Path(row["vhost_path"]))
+        except php_ops.PhpError as e:
+            raise HTTPException(500, str(e)) from e
+        conn.execute("UPDATE sites SET php_version = ? WHERE id = ?", (req.php_version, site_id))
+        _log(conn, user, "site.php-update", f"{row['domain']}: {old_version} -> {req.php_version}")
+    return {"ok": True, "php_version": req.php_version}
+
+# ------------------------------------------------------- domain tambahan
+
+def _add_domain_db(conn, site_id: int, domain: str) -> None:
+    """Insert row site_domains. Raise HTTPException kalau duplikat."""
+    if conn.execute("SELECT 1 FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain)).fetchone():
+        raise HTTPException(409, f"Domain {domain} sudah terpasang di site ini")
+    conn.execute("INSERT INTO site_domains (site_id, domain) VALUES (?, ?)", (site_id, domain))
+
+@app.post("/api/sites/{site_id}/domains")
+def add_domain(site_id: int, req: DomainAdd, user: dict = Depends(require_auth)) -> dict:
+    """Pasang domain tambahan (alias) ke site. Update server_name vhost."""
+    domain = req.domain.strip().lower()
+    if not validate.valid_domain(domain):
+        raise HTTPException(400, "Domain tidak valid")
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        # domain utama site lain? site_domains lain?
+        if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone():
+            raise HTTPException(409, f"Domain {domain} sudah jadi site utama")
+        if conn.execute("SELECT 1 FROM site_domains WHERE domain = ?", (domain,)).fetchone():
+            raise HTTPException(409, f"Domain {domain} sudah dipakai site lain")
+        if row["webserver"] != "nginx":
+            raise HTTPException(400, f"Alias domain hanya untuk site nginx (site ini: {row['webserver']})")
+        _add_domain_db(conn, site_id, domain)
+        names = [d for d in conn.execute(
+            "SELECT domain FROM site_domains WHERE site_id = ?", (site_id,)).fetchall()]
+        try:
+            webserver_ops.nginx_set_server_names(row["domain"], [row["domain"], *(r["domain"] for r in names)])
+        except webserver_ops.WebserverError as e:
+            conn.execute("DELETE FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain))
+            raise HTTPException(500, str(e)) from e
+        _log(conn, user, "site.domain-add", f"{row['domain']}: +{domain}")
+    return {"ok": True, "domain": domain}
+
+@app.delete("/api/sites/{site_id}/domains/{domain}")
+def remove_domain(site_id: int, domain: str, user: dict = Depends(require_auth)) -> dict:
+    """Lepas domain tambahan. Domain utama (sites.domain) tidak bisa dihapus."""
+    domain = domain.strip().lower()
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["domain"] == domain:
+            raise HTTPException(400, "Domain utama tidak bisa dihapus lewat sini")
+        if not conn.execute("SELECT 1 FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain)).fetchone():
+            raise HTTPException(404, f"Domain {domain} tidak terpasang")
+        conn.execute("DELETE FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain))
+        names = [r["domain"] for r in conn.execute(
+            "SELECT domain FROM site_domains WHERE site_id = ?", (site_id,)).fetchall()]
+        try:
+            webserver_ops.nginx_set_server_names(row["domain"], [row["domain"], *names])
+        except webserver_ops.WebserverError as e:
+            _add_domain_db(conn, site_id, domain)  # rollback row
+            raise HTTPException(500, str(e)) from e
+        _log(conn, user, "site.domain-remove", f"{row['domain']}: -{domain}")
+    return {"ok": True}
+
+# ------------------------------------------------------- proxy penuh (port)
+
+class ProxyToggle(BaseModel):
+    enabled: bool
+
+@app.post("/api/sites/{site_id}/proxy")
+def toggle_proxy(site_id: int, req: ProxyToggle, user: dict = Depends(require_auth)) -> dict:
+    """Mode proxy penuh: vhost listen di port site + location / -> localhost:port.
+    Butuh site punya port. Nginx-only."""
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["webserver"] != "nginx":
+            raise HTTPException(400, f"Proxy hanya untuk site nginx (site ini: {row['webserver']})")
+        if req.enabled and not row["port"]:
+            raise HTTPException(400, "Set port site dulu sebelum proxy ON (endpoint PUT /api/sites/{id}/port)")
+        try:
+            if req.enabled:
+                webserver_ops.nginx_proxy_enable(row["domain"], row["port"])
+            else:
+                webserver_ops.nginx_proxy_disable(row["domain"])
+        except webserver_ops.WebserverError as e:
+            raise HTTPException(500, str(e)) from e
+        conn.execute("UPDATE sites SET proxy_enabled = ? WHERE id = ?", (int(req.enabled), site_id))
+        _log(conn, user, "site.proxy" + ("-on" if req.enabled else "-off"), row["domain"])
+    return {"ok": True, "proxy_enabled": req.enabled}
+
+class PortUpdate(BaseModel):
+    port: int
+
+@app.put("/api/sites/{site_id}/port")
+def update_site_port(site_id: int, req: PortUpdate, user: dict = Depends(require_auth)) -> dict:
+    """Set port site (untuk proxy project). Kalau proxy sedang ON, terapkan
+    langsung ke vhost (listen + proxy_pass)."""
+    if not 1 <= req.port <= 65535:
+        raise HTTPException(400, "Port tidak valid (1-65535)")
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["webserver"] != "nginx":
+            raise HTTPException(400, f"Proxy hanya untuk site nginx (site ini: {row['webserver']})")
+        if row["proxy_enabled"]:
+            try:
+                webserver_ops.nginx_proxy_enable(row["domain"], req.port)
+            except webserver_ops.WebserverError as e:
+                raise HTTPException(500, str(e)) from e
+        conn.execute("UPDATE sites SET port = ? WHERE id = ?", (req.port, site_id))
+        _log(conn, user, "site.port", f"{row['domain']}: {row['port']} -> {req.port}")
+    return {"ok": True, "port": req.port}
