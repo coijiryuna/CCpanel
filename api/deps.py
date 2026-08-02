@@ -21,8 +21,6 @@ from core import apps as apps_ops
 from core import webserver as webserver_ops
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "ccpanel.db"
 STATIC_DIR = BASE_DIR / "static"
 
 JWT_SECRET = os.environ.get("PANEL_JWT_SECRET") or secrets.token_hex(32)
@@ -32,14 +30,20 @@ app = FastAPI(title="CCPanel", docs_url=None, redoc_url=None)
 bearer = HTTPBearer(auto_error=False)
 
 # ------------------------------------------------------------------ database
+def _data_dir() -> Path:
+    return Path(os.environ.get("CCPANEL_DATA_DIR", BASE_DIR / "data"))
+
+def _db_path() -> Path:
+    return _data_dir() / "ccpanel.db"
+
 def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_db_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 def init_db() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _data_dir().mkdir(parents=True, exist_ok=True)
     with get_db() as conn:
         conn.executescript(
             """

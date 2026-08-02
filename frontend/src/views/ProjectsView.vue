@@ -1,9 +1,11 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../api.js'
 import { useToast } from '../composables/useToast.js'
 
 const { notify } = useToast()
+const router = useRouter()
 
 const APP_TYPES = ['node', 'python', 'go', 'docker']
 const DEFAULT_ENTRY = { node: 'index.js', python: 'app:app', go: 'app', docker: 'docker-compose.yml' }
@@ -19,6 +21,7 @@ const busy = ref(false)
 const form = ref({
   name: '', app_type: 'node', port: 8000, entry: '', run_opt: '',
   user: 'www', node_version: '', pm2: false, remark: '', domain: '',
+  root_path: '',
 })
 
 const visibleProjects = computed(() => projects.value.filter(p => p.app_type === activeTab.value))
@@ -60,6 +63,39 @@ function openEdit(p) {
   showAdd.value = true
 }
 
+function openFileManager(p) {
+  // Determine which root to use based on the project's root_path
+  const rootPath = p.root_path || ''
+  let rootKey = 'project'
+  let relativePath = ''
+
+  if (rootPath.startsWith('/www/wwwroot/') || rootPath.startsWith('/www/wwwroot')) {
+    rootKey = 'wwwroot'
+    // Extract relative path from WWW_ROOT
+    const wwwRoot = '/www/wwwroot'
+    if (rootPath.startsWith(wwwRoot + '/')) {
+      relativePath = rootPath.slice(wwwRoot.length + 1)
+    }
+  } else if (rootPath.startsWith('/www/project/') || rootPath.startsWith('/www/project')) {
+    // Extract relative path from PROJECT_ROOT
+    const projectRoot = '/www/project'
+    if (rootPath.startsWith(projectRoot + '/')) {
+      relativePath = rootPath.slice(projectRoot.length + 1)
+    }
+  } else {
+    // For custom paths (like /tmp/ccp-demo/project/...), try to extract relative to PROJECT_ROOT
+    const projectRoot = '/www/project'
+    if (rootPath.startsWith(projectRoot + '/')) {
+      relativePath = rootPath.slice(projectRoot.length + 1)
+    } else {
+      // Fallback: use the last path component
+      relativePath = rootPath.split('/').pop() || ''
+    }
+  }
+
+  router.push({ name: 'files-generic', params: { rootKey }, query: { path: relativePath } })
+}
+
 async function save() {
   busy.value = true
   try {
@@ -80,6 +116,9 @@ async function save() {
     } else {
       payload.name = form.value.name
       payload.domain = form.value.domain
+      if (form.value.root_path) {
+        payload.root_path = form.value.root_path
+      }
       await api.post('/api/projects', payload)
       notify('Project ditambahkan')
     }
@@ -173,6 +212,7 @@ async function detachDomain(p) {
             <button @click="action(p, 'stop')" :disabled="p.state !== 'running'">Stop</button>
             <button @click="action(p, 'restart')">Restart</button>
             <button @click="tailLog(p)">Log</button>
+            <button @click="openFileManager(p)">📁 FileManager</button>
             <button @click="openEdit(p)">Ubah</button>
             <button class="danger" @click="remove(p)">Hapus</button>
           </td>
@@ -226,7 +266,11 @@ async function detachDomain(p) {
           <input v-model="form.remark" placeholder="Catatan" />
         </div>
         <div v-if="!editId" class="field">
-          <label>Domain langsung (opsional — kosong = backend localhost:port saja)</label>
+          <label>Root path (opsional - kosong = auto PROJECT_ROOT/&lt;nama&gt;, isi = folder existing)</label>
+          <input v-model="form.root_path" placeholder="/www/wwwroot/my-project" />
+        </div>
+        <div v-if="!editId" class="field">
+          <label>Domain langsung (opsional - kosong = backend localhost:port saja)</label>
           <input v-model="form.domain" placeholder="api.example.com" />
         </div>
         <div class="modal-actions">
@@ -239,7 +283,7 @@ async function detachDomain(p) {
     <!-- Pasang domain -->
     <div v-if="domainFor" class="modal-backdrop" @click.self="domainFor = null">
       <form class="modal" @submit.prevent="saveDomain">
-        <h3>Domain — {{ domainFor.project.name }}</h3>
+        <h3>Domain - {{ domainFor.project.name }}</h3>
         <p class="dim">Vhost proxy nginx: domain → http://127.0.0.1:{{ domainFor.project.port }}. Butuh DNS A record.</p>
         <div class="field">
           <label>Domain</label>

@@ -10,7 +10,7 @@ import VhostEditor from '../components/VhostEditor.vue'
 const { notify } = useToast()
 const router = useRouter()
 
-const PROJECT_TABS = ['static', 'php', 'node', 'python', 'go', 'docker']
+const PROJECT_TABS = ['static', 'php']
 const activeTab = ref('static')
 
 const sites = ref([])

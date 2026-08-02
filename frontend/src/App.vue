@@ -31,6 +31,7 @@ async function renewSsl() {
         <RouterLink to="/projects">Projects</RouterLink>
         <RouterLink to="/appstore">App Store</RouterLink>
         <RouterLink to="/files">Files</RouterLink>
+        <RouterLink to="/files-generic">File Manager Global</RouterLink>
         <RouterLink to="/databases">Databases</RouterLink>
         <RouterLink v-if="isAdmin" to="/trash">Trash</RouterLink>
         <RouterLink v-if="isAdmin" to="/logs">Logs</RouterLink>

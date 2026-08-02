@@ -33,6 +33,7 @@ class ProjectCreate(BaseModel):
     pm2: bool = False
     remark: str | None = None
     domain: str | None = None
+    root_path: str | None = None  # optional: pakai folder existing
 
 
 class ProjectUpdate(BaseModel):
@@ -44,6 +45,7 @@ class ProjectUpdate(BaseModel):
     node_version: str | None = None
     pm2: bool | None = None
     remark: str | None = None
+    root_path: str | None = None  # optional: pindah ke folder existing
 
 
 def _project_row(conn, row) -> dict:
@@ -104,6 +106,14 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
     if domain and not validate.valid_domain(domain):
         raise HTTPException(400, f"Domain tidak valid: {domain}")
 
+    # resolve root_path: user-provided or default PROJECT_ROOT/<name>
+    if req.root_path:
+        root = Path(req.root_path).resolve()
+        if not root.exists():
+            raise HTTPException(400, f"Folder root_path tidak ada: {root}")
+    else:
+        root = apps_ops.project_root(name)
+
     with get_db() as conn:
         if conn.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
             raise HTTPException(409, f"Project {name} sudah ada")
@@ -117,10 +127,30 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
             ).fetchone():
                 raise HTTPException(409, f"Domain {domain} sudah jadi alias site")
         try:
-            root = apps_ops.create_standalone(
-                name, req.app_type, req.port, entry,
-                user=run_user, run_opt=run_opt, pm2=req.pm2, node_version=node_version,
-            )
+            if req.root_path:
+                # user-provided folder: just create systemd unit, don't create folder
+                if req.app_type not in apps_ops.APP_TYPES:
+                    raise HTTPException(400, f"app_type tidak valid. Pilihan: {', '.join(apps_ops.APP_TYPES)}")
+                if not 1 <= req.port <= 65535:
+                    raise HTTPException(400, f"Port tidak valid: {req.port}")
+                if req.app_type == "docker":
+                    if not (root / "docker-compose.yml").exists():
+                        raise HTTPException(400, f"docker-compose.yml tidak ada di {root}")
+                if req.app_type == "go":
+                    bin_path = root / entry
+                    if not bin_path.exists():
+                        raise HTTPException(400, f"Binary {entry} tidak ada di {root}")
+                    bin_path.chmod(0o755)
+                apps_ops._do_create(
+                    apps_ops._standalone_unit_path(name), name, root, req.app_type, req.port, entry,
+                    run_user, run_opt, req.pm2, name, node_version,
+                )
+                final_root = root
+            else:
+                final_root = apps_ops.create_standalone(
+                    name, req.app_type, req.port, entry,
+                    user=run_user, run_opt=run_opt, pm2=req.pm2, node_version=node_version,
+                )
             if domain:
                 nginx_ops.project_proxy_enable(domain, req.port)
         except (apps_ops.AppError, nginx_ops.NginxError) as e:
@@ -128,7 +158,7 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
         cur = conn.execute(
             "INSERT INTO projects (name, app_type, port, entry, root_path, run_opt, user, node_version, pm2, remark, domain, owner_id, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (name, req.app_type, req.port, entry, str(root), run_opt, run_user,
+            (name, req.app_type, req.port, entry, str(final_root), run_opt, run_user,
              node_version, 1 if req.pm2 else 0, remark, domain,
              None if user["role"] == "admin" else user["id"],
              datetime.now(timezone.utc).isoformat()),
@@ -147,18 +177,48 @@ def update_project(project_id: int, req: ProjectUpdate, user: dict = Depends(req
         port = req.port or row["port"]
         entry = (req.entry if req.entry is not None else row["entry"] or apps_ops.DEFAULT_ENTRY[app_type]).strip()
         run_opt = (req.run_opt if req.run_opt is not None else row["run_opt"] or "").strip()
-        user = (req.user if req.user is not None else row["user"] or apps_ops.DEFAULT_USER).strip()
+        run_user = (req.user if req.user is not None else row["user"] or apps_ops.DEFAULT_USER).strip()
         node_version = (req.node_version if req.node_version is not None else row["node_version"] or "").strip()
         pm2 = req.pm2 if req.pm2 is not None else bool(row["pm2"])
         remark = (req.remark if req.remark is not None else row["remark"] or "").strip()
         _validate_fields(app_type, port, node_version)
-        root = Path(row["root_path"]) if row["root_path"] else apps_ops.project_root(row["name"])
+        
+        # handle root_path change
+        old_root = Path(row["root_path"]) if row["root_path"] else apps_ops.project_root(row["name"])
+        new_root = old_root
+        if req.root_path is not None:
+            if req.root_path:
+                new_root = Path(req.root_path).resolve()
+                if not new_root.exists():
+                    raise HTTPException(400, f"Folder root_path tidak ada: {new_root}")
+            else:
+                new_root = apps_ops.project_root(row["name"])
+        
         try:
             apps_ops.remove_standalone(row["name"], row["app_type"])
-            apps_ops.create_standalone(
-                row["name"], app_type, port, entry,
-                user=user, run_opt=run_opt, pm2=pm2, node_version=node_version,
-            )
+            if req.root_path is not None and req.root_path:
+                # user-provided folder: just create systemd unit
+                if app_type not in apps_ops.APP_TYPES:
+                    raise HTTPException(400, f"app_type tidak valid. Pilihan: {', '.join(apps_ops.APP_TYPES)}")
+                if not 1 <= port <= 65535:
+                    raise HTTPException(400, f"Port tidak valid: {port}")
+                if app_type == "docker":
+                    if not (new_root / "docker-compose.yml").exists():
+                        raise HTTPException(400, f"docker-compose.yml tidak ada di {new_root}")
+                if app_type == "go":
+                    bin_path = new_root / entry
+                    if not bin_path.exists():
+                        raise HTTPException(400, f"Binary {entry} tidak ada di {new_root}")
+                    bin_path.chmod(0o755)
+                apps_ops._do_create(
+                    apps_ops._standalone_unit_path(row["name"]), row["name"], new_root, app_type, port, entry,
+                    run_user, run_opt, pm2, row["name"], node_version,
+                )
+            else:
+                new_root = apps_ops.create_standalone(
+                    row["name"], app_type, port, entry,
+                    user=run_user, run_opt=run_opt, pm2=pm2, node_version=node_version,
+                )
             # domain proxy: kalau aktif dan port berubah, tulis ulang vhost
             if row["domain"] and row["port"] != port:
                 nginx_ops.project_proxy_disable(row["domain"])
@@ -166,9 +226,9 @@ def update_project(project_id: int, req: ProjectUpdate, user: dict = Depends(req
         except (apps_ops.AppError, nginx_ops.NginxError) as e:
             raise HTTPException(500, str(e)) from e
         conn.execute(
-            "UPDATE projects SET app_type=?, port=?, entry=?, run_opt=?, user=?, node_version=?, pm2=?, remark=? WHERE id=?",
-            (app_type, port, entry, run_opt, user, node_version, 1 if pm2 else 0,
-             remark, project_id),
+            "UPDATE projects SET app_type=?, port=?, entry=?, run_opt=?, user=?, node_version=?, pm2=?, remark=?, root_path=? WHERE id=?",
+            (app_type, port, entry, run_opt, run_user, node_version, 1 if pm2 else 0,
+             remark, str(new_root), project_id),
         )
         _log(conn, user, "project.update", f"{row['name']}: {app_type} port {port}")
         row2 = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()

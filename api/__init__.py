@@ -10,6 +10,7 @@ from . import (  # noqa: F401  (import = register route ke app)
     cron,
     dbs,
     files,
+    files_generic,
     ftp,
     logs,
     projects,

@@ -16,7 +16,7 @@ from core import webserver as webserver_ops
 
 from .deps import _log, app, check_site_access, get_db, require_auth
 
-PROJECT_TYPES = ["static", "php", "node", "python", "go", "docker"]
+PROJECT_TYPES = ["static", "php"]
 
 class SiteCreate(BaseModel):
     domain: str
