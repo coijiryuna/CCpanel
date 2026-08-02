@@ -11,6 +11,9 @@ data/
 # Env
 .env
 
+# Skill
+SKILL.md
+
 # Node / frontend
 node_modules/
 frontend/dist/
