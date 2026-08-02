@@ -1,6 +1,7 @@
 ---
-name: 9router
-description: Entry point for 9Router — local/remote AI gateway with OpenAI-compatible REST for chat, image, TTS, embeddings, web search, web fetch. Use when the user mentions 9Router, NINEROUTER_URL, or wants AI without writing provider boilerplate. This skill covers setup + indexes capability skills; fetch the relevant capability SKILL.md from the URLs below when needed.
+name: ccpanel
+description: Panel hosting ringan, self-hosted, open-source, gratis. Nginx + PHP-FPM + MariaDB + FTP + SSL + Cron + Trash + Backup. Bisa diakses via web browser, API, atau CLI. Cocok untuk VPS kecil (1GB RAM). Cocok untuk developer, sysadmin, atau pemilik website yang ingin kontrol penuh atas servernya.
+Entry point for 9Router — local/remote AI gateway with OpenAI-compatible REST for chat, image, TTS, embeddings, web search, web fetch. Use when the user mentions 9Router, NINEROUTER_URL, or wants AI without writing provider boilerplate. This skill covers setup + indexes capability skills; fetch the relevant capability SKILL.md from the URLs below when needed.
 use language Indonesia to answer all question
 ---
 
