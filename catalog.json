@@ -1,0 +1,460 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "php7.4",
+      "name": "PHP 7.4",
+      "category": "php",
+      "desc": "PHP-FPM 7.4 (legacy)",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "php7.4-fpm"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "php7.4-fpm"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "php7.4",
+          "php-fpm7.4"
+        ]
+      }
+    },
+    {
+      "id": "php8.0",
+      "name": "PHP 8.0",
+      "category": "php",
+      "desc": "PHP-FPM 8.0",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "php8.0-fpm"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "php8.0-fpm"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "php8.0",
+          "php-fpm8.0"
+        ]
+      }
+    },
+    {
+      "id": "php8.1",
+      "name": "PHP 8.1",
+      "category": "php",
+      "desc": "PHP-FPM 8.1",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "php8.1-fpm"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "php8.1-fpm"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "php8.1",
+          "php-fpm8.1"
+        ]
+      }
+    },
+    {
+      "id": "php8.2",
+      "name": "PHP 8.2",
+      "category": "php",
+      "desc": "PHP-FPM 8.2",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "php8.2-fpm"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "php8.2-fpm"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "php8.2",
+          "php-fpm8.2"
+        ]
+      }
+    },
+    {
+      "id": "php8.3",
+      "name": "PHP 8.3",
+      "category": "php",
+      "desc": "PHP-FPM 8.3",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "php8.3-fpm"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "php8.3-fpm"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "php8.3",
+          "php-fpm8.3"
+        ]
+      }
+    },
+    {
+      "id": "node18",
+      "name": "Node.js 18",
+      "category": "node",
+      "desc": "Node.js v18 LTS via nvm",
+      "install": [
+        "bash",
+        "-lc",
+        "source ~/.nvm/nvm.sh && nvm install 18"
+      ],
+      "uninstall": [
+        "bash",
+        "-lc",
+        "source ~/.nvm/nvm.sh && nvm uninstall 18"
+      ],
+      "detect": {
+        "type": "dir",
+        "path": "~/.nvm/versions/node/v18"
+      }
+    },
+    {
+      "id": "node20",
+      "name": "Node.js 20",
+      "category": "node",
+      "desc": "Node.js v20 LTS via nvm",
+      "install": [
+        "bash",
+        "-lc",
+        "source ~/.nvm/nvm.sh && nvm install 20"
+      ],
+      "uninstall": [
+        "bash",
+        "-lc",
+        "source ~/.nvm/nvm.sh && nvm uninstall 20"
+      ],
+      "detect": {
+        "type": "dir",
+        "path": "~/.nvm/versions/node/v20"
+      }
+    },
+    {
+      "id": "node22",
+      "name": "Node.js 22",
+      "category": "node",
+      "desc": "Node.js v22 LTS via nvm",
+      "install": [
+        "bash",
+        "-lc",
+        "source ~/.nvm/nvm.sh && nvm install 22"
+      ],
+      "uninstall": [
+        "bash",
+        "-lc",
+        "source ~/.nvm/nvm.sh && nvm uninstall 22"
+      ],
+      "detect": {
+        "type": "dir",
+        "path": "~/.nvm/versions/node/v22"
+      }
+    },
+    {
+      "id": "node24",
+      "name": "Node.js 24",
+      "category": "node",
+      "desc": "Node.js v24 via nvm",
+      "install": [
+        "bash",
+        "-lc",
+        "source ~/.nvm/nvm.sh && nvm install 24"
+      ],
+      "uninstall": [
+        "bash",
+        "-lc",
+        "source ~/.nvm/nvm.sh && nvm uninstall 24"
+      ],
+      "detect": {
+        "type": "dir",
+        "path": "~/.nvm/versions/node/v24"
+      }
+    },
+    {
+      "id": "go1.22",
+      "name": "Go 1.22",
+      "category": "go",
+      "desc": "Go SDK 1.22",
+      "install": [
+        "bash",
+        "-lc",
+        "curl -sSL https://go.dev/dl/go1.22.linux-amd64.tar.gz | tar -C /usr/local/go -xzf - && mv /usr/local/go/go /usr/local/go/go1.22"
+      ],
+      "uninstall": [
+        "rm",
+        "-rf",
+        "/usr/local/go/go1.22"
+      ],
+      "detect": {
+        "type": "dir",
+        "path": "/usr/local/go/go1.22"
+      }
+    },
+    {
+      "id": "go1.23",
+      "name": "Go 1.23",
+      "category": "go",
+      "desc": "Go SDK 1.23",
+      "install": [
+        "bash",
+        "-lc",
+        "wget -qO- https://go.dev/dl/go1.23.linux-amd64.tar.gz | tar -C /usr/local/go -xzf && mv /usr/local/go/go /usr/local/go/go1.23"
+      ],
+      "uninstall": [
+        "rm",
+        "-rf",
+        "/usr/local/go/go1.23"
+      ],
+      "detect": {
+        "type": "dir",
+        "path": "/usr/local/go/go1.23"
+      }
+    },
+    {
+      "id": "go1.24",
+      "name": "Go 1.24",
+      "category": "go",
+      "desc": "Go SDK 1.24",
+      "install": [
+        "bash",
+        "-lc",
+        "wget -qO- https://go.dev/dl/go1.24.linux-amd64.tar.gz | tar -C /usr/local/go -xz && mv /usr/local/go/go /usr/local/go/go1.24"
+      ],
+      "uninstall": [
+        "rm",
+        "-rf",
+        "/usr/local/go/go1.24"
+      ],
+      "detect": {
+        "type": "dir",
+        "path": "/usr/local/go/go1.24"
+      }
+    },
+    {
+      "id": "nginx",
+      "name": "Nginx",
+      "category": "app",
+      "desc": "Web server / reverse proxy",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "nginx"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "nginx"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "nginx"
+        ]
+      }
+    },
+    {
+      "id": "mariadb",
+      "name": "MariaDB",
+      "category": "app",
+      "desc": "Database server",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "mariadb-server"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "mariadb-server"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "mysql",
+          "mariadb"
+        ]
+      }
+    },
+    {
+      "id": "redis",
+      "name": "Redis",
+      "category": "app",
+      "desc": "In-memory key-value store",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "redis-server"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "redis-server"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "redis-server"
+        ]
+      }
+    },
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL",
+      "category": "app",
+      "desc": "Relational database",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "postgresql"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "postgresql"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "psql"
+        ]
+      }
+    },
+    {
+      "id": "composer",
+      "name": "Composer",
+      "category": "app",
+      "desc": "PHP dependency manager",
+      "install": [
+        "bash",
+        "-lc",
+        "curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer"
+      ],
+      "uninstall": [
+        "rm",
+        "-f",
+        "/usr/local/bin/composer"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "composer"
+        ]
+      }
+    },
+    {
+      "id": "pm2",
+      "name": "PM2",
+      "category": "app",
+      "desc": "Node.js process manager",
+      "install": [
+        "bash",
+        "-lc",
+        "npm install -g pm2"
+      ],
+      "uninstall": [
+        "bash",
+        "-lc",
+        "npm uninstall -g pm2"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "pm2"
+        ]
+      }
+    },
+    {
+      "id": "certbot",
+      "name": "Certbot",
+      "category": "app",
+      "desc": "SSL certificate automation",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "certbot",
+        "python3-certbot-nginx"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "certbot"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "certbot"
+        ]
+      }
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "category": "app",
+      "desc": "Version control",
+      "install": [
+        "apt-get",
+        "install",
+        "-y",
+        "git"
+      ],
+      "uninstall": [
+        "apt-get",
+        "remove",
+        "-y",
+        "git"
+      ],
+      "detect": {
+        "type": "which",
+        "bin": [
+          "git"
+        ]
+      }
+    }
+  ]
+}

@@ -137,7 +137,7 @@ def _detect(spec) -> bool:
     if t == "which":
         return any(_which(b) for b in spec.get("bin", []))
     if t == "dir":
-        return Path(spec.get("path", "")).is_dir()
+        return Path(os.path.expanduser(spec.get("path", ""))).is_dir()
     return False
 
 

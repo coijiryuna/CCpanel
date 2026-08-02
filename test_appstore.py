@@ -1,4 +1,4 @@
-"""Unit test App Store: katalog, deteksi, install/uninstall.
+"""Unit test App Store: katalog, deteksi, install/uninstall, fetch remote.
 Jalankan:
     .venv/bin/python -m pytest test_appstore.py
 """
@@ -13,6 +13,8 @@ os.environ["CCPANEL_APT"] = "echo"  # fake apt: echo selalu sukses
 os.environ["CCPANEL_NVM_DIR"] = str(Path(_tmp) / "nvm")
 os.environ["CCPANEL_GO_ROOT"] = str(Path(_tmp) / "go")
 os.environ["CCPANEL_APPSTORE_LOG"] = str(Path(_tmp) / "appstore.log")
+os.environ["CCPANEL_APPSTORE_CACHE"] = str(Path(_tmp) / "cache.json")
+os.environ.pop("CCPANEL_APPSTORE_URL", None)  # default: pakai statis
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -26,14 +28,14 @@ def test_catalog_ids_unique():
     ids = [i["id"] for i in store.CATALOG]
     assert len(ids) == len(set(ids))
 
-def test_php_detect_false_when_missing():
-    assert store._php_detect("9.9") is False
+def test_detect_which_false_when_missing():
+    assert store._detect({"type": "which", "bin": ["php9.9"]}) is False
 
-def test_node_detect_false_when_missing():
-    assert store._node_detect("v99") is False
+def test_detect_dir_false_when_missing():
+    assert store._detect({"type": "dir", "path": "/nonexistent/xyz"}) is False
 
-def test_go_detect_false_when_missing():
-    assert store._go_detect("9.9") is False
+def test_detect_unknown_type_false():
+    assert store._detect({"type": "bogus"}) is False
 
 def test_install_php_ok():
     res = store.install("php7.4")
@@ -51,3 +53,32 @@ def test_list_catalog_has_installed_flag():
     items = store.list_catalog()
     assert all("installed" in i for i in items)
     assert any(i["id"] == "php7.4" for i in items)
+
+def test_validate_item_rejects_bad():
+    assert store._validate_item({"id": "x"}) is False
+    assert store._validate_item({"id": "x", "name": "X", "category": "app",
+                                 "install": "notalist", "uninstall": [], "detect": {}}) is False
+
+def test_parse_items_dedup_and_skip_invalid():
+    data = {"items": [
+        {"id": "a", "name": "A", "category": "app", "install": ["x"], "uninstall": ["y"], "detect": {"type": "which", "bin": ["a"]}},
+        {"id": "a", "name": "A2", "category": "app", "install": ["x"], "uninstall": ["y"], "detect": {"type": "which", "bin": ["a"]}},
+        {"id": "bad"},
+    ]}
+    items = store._parse_items(data)
+    assert items is not None
+    assert [i["id"] for i in items] == ["a"]
+
+def test_load_catalog_uses_remote_cache():
+    # tulis cache fresh → _load_catalog harus pakai cache, bukan statis
+    cache_items = [{"id": "custom1", "name": "Custom", "category": "app",
+                    "install": ["echo"], "uninstall": ["echo"], "detect": {"type": "which", "bin": ["zzz"]}}]
+    store.APPSTORE_URL = "https://example.invalid/catalog.json"
+    store._write_cache(cache_items)
+    try:
+        loaded = store._load_catalog()
+        assert [i["id"] for i in loaded] == ["custom1"]
+    finally:
+        store.APPSTORE_URL = None
+        if store.APPSTORE_CACHE.exists():
+            store.APPSTORE_CACHE.unlink()
