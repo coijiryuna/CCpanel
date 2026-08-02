@@ -215,8 +215,9 @@ def _php_fpm_conf_dir(php_version: str) -> Path:
     return PHP_FPM_DIR / php_version / "fpm" / "conf.d"
 
 def _run_sudo(cmd: list[str]) -> subprocess.CompletedProcess:
-    """Run command with sudo if not root."""
-    if os.geteuid() == 0:
+    """Run command with sudo if not root. Skip sudo in demo/test mode."""
+    # Demo/test mode: CCPANEL_PHP_FPM_DIR points to /tmp/ccp-demo/...
+    if os.geteuid() == 0 or str(PHP_FPM_DIR).startswith("/tmp/"):
         return _run(cmd)
     return _run(["sudo", "-n"] + cmd)
 
@@ -229,7 +230,8 @@ def set_ini(php_version: str, key: str, value: str) -> None:
         raise PhpError(f"php.ini tidak ditemukan: {ini_path}")
     
     txt = ini_path.read_text()
-    pattern = rf"^\s*{re.escape(key)}\s*="
+    # match entire line: key = value (with optional spaces)
+    pattern = rf"^\s*{re.escape(key)}\s*=.*$"
     new_line = f"{key} = {value}"
     
     if re.search(pattern, txt, re.M):
@@ -377,7 +379,8 @@ def set_pool_option(domain: str, php_version: str, key: str, value: str) -> None
         raise PhpError(f"Pool tidak ditemukan: {pool_file}")
     
     txt = pool_file.read_text()
-    pattern = rf"^\s*{re.escape(key)}\s*="
+    # match entire line: key = value (with optional spaces)
+    pattern = rf"^\s*{re.escape(key)}\s*=.*$"
     new_line = f"{key} = {value}"
     
     if re.search(pattern, txt, re.M):
