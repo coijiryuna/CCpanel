@@ -198,3 +198,229 @@ def get_pool_status(domain: str) -> dict:
         pool_file = pool_path(domain, version)
         status[version] = pool_file.exists()
     return status
+
+
+# ==================== PHP INI / EXTENSIONS / POOL OPTIONS ====================
+
+def _php_ini_path(php_version: str) -> Path:
+    """Return php.ini path for given PHP version."""
+    return PHP_FPM_DIR / php_version / "fpm" / "php.ini"
+
+def _php_mods_dir(php_version: str) -> Path:
+    """Return mods-available directory for given PHP version."""
+    return PHP_FPM_DIR / php_version / "mods-available"
+
+def _php_fpm_conf_dir(php_version: str) -> Path:
+    """Return fpm conf.d directory for given PHP version."""
+    return PHP_FPM_DIR / php_version / "fpm" / "conf.d"
+
+def _run_sudo(cmd: list[str]) -> subprocess.CompletedProcess:
+    """Run command with sudo if not root."""
+    if os.geteuid() == 0:
+        return _run(cmd)
+    return _run(["sudo", "-n"] + cmd)
+
+def set_ini(php_version: str, key: str, value: str) -> None:
+    """Set php.ini value for given PHP version. Reloads FPM."""
+    if php_version not in PHP_VERSIONS:
+        raise PhpError(f"PHP version tidak valid: {php_version}")
+    ini_path = _php_ini_path(php_version)
+    if not ini_path.exists():
+        raise PhpError(f"php.ini tidak ditemukan: {ini_path}")
+    
+    txt = ini_path.read_text()
+    pattern = rf"^\s*{re.escape(key)}\s*="
+    new_line = f"{key} = {value}"
+    
+    if re.search(pattern, txt, re.M):
+        txt = re.sub(pattern, new_line, txt, flags=re.M)
+    else:
+        # tambah di akhir file
+        txt = txt.rstrip() + f"\n{new_line}\n"
+    
+    # write via sudo if needed
+    tmp = Path(f"/tmp/php_ini_{php_version}_{key}.tmp")
+    tmp.write_text(txt)
+    res = _run_sudo(["cp", str(tmp), str(ini_path)])
+    tmp.unlink(missing_ok=True)
+    if res.returncode != 0:
+        raise PhpError(res.stderr.strip() or f"gagal write {ini_path}")
+    
+    php_fpm_reload(php_version)
+
+def get_ini(php_version: str) -> dict:
+    """Get all php.ini key=value pairs for given PHP version."""
+    if php_version not in PHP_VERSIONS:
+        raise PhpError(f"PHP version tidak valid: {php_version}")
+    ini_path = _php_ini_path(php_version)
+    if not ini_path.exists():
+        return {}
+    
+    txt = ini_path.read_text()
+    out = {}
+    for line in txt.splitlines():
+        line = line.strip()
+        if not line or line.startswith(";") or line.startswith("#"):
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+def get_common_ini_keys() -> list[str]:
+    """Return list of commonly configured php.ini keys."""
+    return [
+        "memory_limit", "max_execution_time", "max_input_time",
+        "post_max_size", "upload_max_filesize", "max_file_uploads",
+        "disable_functions", "open_basedir", "date.timezone",
+        "error_reporting", "display_errors", "log_errors",
+        "error_log", "session.save_path", "session.gc_maxlifetime",
+        "opcache.enable", "opcache.memory_consumption", "opcache.max_accelerated_files",
+        "realpath_cache_size", "realpath_cache_ttl",
+    ]
+
+def list_extensions(php_version: str) -> list[dict]:
+    """List available extensions for PHP version with enabled status."""
+    if php_version not in PHP_VERSIONS:
+        raise PhpError(f"PHP version tidak valid: {php_version}")
+    
+    mods_dir = _php_mods_dir(php_version)
+    fpm_conf_dir = _php_fpm_conf_dir(php_version)
+    
+    if not mods_dir.exists():
+        return []
+    
+    exts = []
+    for ini_file in mods_dir.glob("*.ini"):
+        ext_name = ini_file.stem
+        # check if enabled in fpm conf.d (symlink)
+        enabled = (fpm_conf_dir / f"20-{ext_name}.ini").exists()
+        exts.append({"name": ext_name, "enabled": enabled})
+    
+    return sorted(exts, key=lambda x: x["name"])
+
+def enable_extension(php_version: str, ext_name: str) -> None:
+    """Enable PHP extension for FPM (creates symlink in conf.d)."""
+    if php_version not in PHP_VERSIONS:
+        raise PhpError(f"PHP version tidak valid: {php_version}")
+    
+    mods_dir = _php_mods_dir(php_version)
+    fpm_conf_dir = _php_fpm_conf_dir(php_version)
+    
+    src = mods_dir / f"{ext_name}.ini"
+    if not src.exists():
+        raise PhpError(f"Extension {ext_name} tidak ditemukan untuk {php_version}")
+    
+    fpm_conf_dir.mkdir(parents=True, exist_ok=True)
+    dst = fpm_conf_dir / f"20-{ext_name}.ini"
+    
+    if not dst.exists():
+        res = _run_sudo(["ln", "-sf", str(src), str(dst)])
+        if res.returncode != 0:
+            raise PhpError(res.stderr.strip() or f"gagal enable {ext_name}")
+        php_fpm_reload(php_version)
+
+def disable_extension(php_version: str, ext_name: str) -> None:
+    """Disable PHP extension for FPM (removes symlink from conf.d)."""
+    if php_version not in PHP_VERSIONS:
+        raise PhpError(f"PHP version tidak valid: {php_version}")
+    
+    fpm_conf_dir = _php_fpm_conf_dir(php_version)
+    dst = fpm_conf_dir / f"20-{ext_name}.ini"
+    
+    if dst.exists():
+        res = _run_sudo(["rm", "-f", str(dst)])
+        if res.returncode != 0:
+            raise PhpError(res.stderr.strip() or f"gagal disable {ext_name}")
+        php_fpm_reload(php_version)
+
+def install_extension(php_version: str, ext_name: str) -> None:
+    """Install PHP extension via apt (e.g., php8.3-gd)."""
+    if php_version not in PHP_VERSIONS:
+        raise PhpError(f"PHP version tidak valid: {php_version}")
+    
+    # map extension name to package name
+    pkg_map = {
+        "gd": f"{php_version}-gd",
+        "curl": f"{php_version}-curl",
+        "mbstring": f"{php_version}-mbstring",
+        "xml": f"{php_version}-xml",
+        "zip": f"{php_version}-zip",
+        "mysql": f"{php_version}-mysql",
+        "pgsql": f"{php_version}-pgsql",
+        "redis": f"{php_version}-redis",
+        "imagick": f"{php_version}-imagick",
+        "intl": f"{php_version}-intl",
+        "bcmath": f"{php_version}-bcmath",
+        "soap": f"{php_version}-soap",
+        "xdebug": f"{php_version}-xdebug",
+        "igbinary": f"{php_version}-igbinary",
+        "msgpack": f"{php_version}-msgpack",
+    }
+    
+    pkg = pkg_map.get(ext_name.lower(), f"{php_version}-{ext_name}")
+    res = _run_sudo(["apt-get", "update", "-qq"])
+    res = _run_sudo(["apt-get", "install", "-y", pkg])
+    if res.returncode != 0:
+        raise PhpError(res.stderr.strip() or f"gagal install {pkg}")
+    
+    # auto-enable after install
+    enable_extension(php_version, ext_name)
+
+def set_pool_option(domain: str, php_version: str, key: str, value: str) -> None:
+    """Set PHP-FPM pool option for a domain. Reloads FPM."""
+    if php_version not in PHP_VERSIONS:
+        raise PhpError(f"PHP version tidak valid: {php_version}")
+    
+    pool_file = pool_path(domain, php_version)
+    if not pool_file.exists():
+        raise PhpError(f"Pool tidak ditemukan: {pool_file}")
+    
+    txt = pool_file.read_text()
+    pattern = rf"^\s*{re.escape(key)}\s*="
+    new_line = f"{key} = {value}"
+    
+    if re.search(pattern, txt, re.M):
+        txt = re.sub(pattern, new_line, txt, flags=re.M)
+    else:
+        # tambah sebelum penutup ]
+        txt = txt.rstrip() + f"\n{new_line}\n"
+    
+    tmp = Path(f"/tmp/pool_{domain}_{php_version}_{key}.tmp")
+    tmp.write_text(txt)
+    res = _run_sudo(["cp", str(tmp), str(pool_file)])
+    tmp.unlink(missing_ok=True)
+    if res.returncode != 0:
+        raise PhpError(res.stderr.strip() or f"gagal write {pool_file}")
+    
+    php_fpm_reload(php_version)
+
+def get_pool_options(domain: str, php_version: str) -> dict:
+    """Get all pool options for a domain."""
+    if php_version not in PHP_VERSIONS:
+        raise PhpError(f"PHP version tidak valid: {php_version}")
+    
+    pool_file = pool_path(domain, php_version)
+    if not pool_file.exists():
+        return {}
+    
+    txt = pool_file.read_text()
+    out = {}
+    for line in txt.splitlines():
+        line = line.strip()
+        if not line or line.startswith(";") or line.startswith("#") or line.startswith("["):
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+def get_common_pool_keys() -> list[str]:
+    """Return list of commonly configured pool options."""
+    return [
+        "pm.max_children", "pm.start_servers", "pm.min_spare_servers",
+        "pm.max_spare_servers", "pm.max_requests", "request_terminate_timeout",
+        "request_slowlog_timeout", "slowlog", "rlimit_files", "rlimit_core",
+        "chdir", "catch_workers_output", "clear_env",
+        "security.limit_extensions",
+    ]

@@ -320,6 +320,116 @@ def update_site_php(site_id: int, req: SitePhpUpdate, user: dict = Depends(requi
         _log(conn, user, "site.php-update", f"{row['domain']}: {old_version} -> {req.php_version}")
     return {"ok": True, "php_version": req.php_version}
 
+
+# ==================== PHP CONFIGURATION API ====================
+
+class PhpIniUpdate(BaseModel):
+    ini: dict[str, str] = {}
+
+@app.get("/api/sites/{site_id}/php-config")
+def get_site_php_config(site_id: int, user: dict = Depends(require_auth)) -> dict:
+    """Get PHP configuration for a site: ini, pool options, extensions."""
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
+            raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
+        version = row["php_version"]
+        return {
+            "php_version": version,
+            "ini": php_ops.get_ini(version),
+            "common_ini_keys": php_ops.get_common_ini_keys(),
+            "pool": php_ops.get_pool_options(row["domain"], version),
+            "common_pool_keys": php_ops.get_common_pool_keys(),
+            "extensions": php_ops.list_extensions(version),
+        }
+
+@app.put("/api/sites/{site_id}/php-config")
+def update_site_php_config(site_id: int, req: PhpIniUpdate, user: dict = Depends(require_auth)) -> dict:
+    """Update PHP ini settings for a site's PHP version."""
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
+            raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
+        version = row["php_version"]
+        for key, value in req.ini.items():
+            if key not in php_ops.get_common_ini_keys():
+                continue  # skip unknown keys
+            try:
+                php_ops.set_ini(version, key, value)
+            except php_ops.PhpError as e:
+                raise HTTPException(500, f"{key}: {e}") from e
+        _log(conn, user, "site.php-ini-update", f"{row['domain']}: {list(req.ini.keys())}")
+    return {"ok": True, "updated": list(req.ini.keys())}
+
+
+class PhpPoolUpdate(BaseModel):
+    pool: dict[str, str] = {}
+
+@app.put("/api/sites/{site_id}/php-pool")
+def update_site_php_pool(site_id: int, req: PhpPoolUpdate, user: dict = Depends(require_auth)) -> dict:
+    """Update PHP-FPM pool options for a site."""
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
+            raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
+        version = row["php_version"]
+        for key, value in req.pool.items():
+            if key not in php_ops.get_common_pool_keys():
+                continue
+            try:
+                php_ops.set_pool_option(row["domain"], version, key, value)
+            except php_ops.PhpError as e:
+                raise HTTPException(500, f"{key}: {e}") from e
+        _log(conn, user, "site.php-pool-update", f"{row['domain']}: {list(req.pool.keys())}")
+    return {"ok": True, "updated": list(req.pool.keys())}
+
+
+class PhpExtensionAction(BaseModel):
+    extension: str
+
+@app.post("/api/sites/{site_id}/php-extensions/enable")
+def enable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
+    """Enable PHP extension for site's PHP version."""
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
+            raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
+        try:
+            php_ops.enable_extension(row["php_version"], req.extension)
+        except php_ops.PhpError as e:
+            raise HTTPException(500, str(e)) from e
+        _log(conn, user, "site.php-ext-enable", f"{row['domain']}: {req.extension}")
+    return {"ok": True, "extension": req.extension, "enabled": True}
+
+@app.post("/api/sites/{site_id}/php-extensions/disable")
+def disable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
+    """Disable PHP extension for site's PHP version."""
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
+            raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
+        try:
+            php_ops.disable_extension(row["php_version"], req.extension)
+        except php_ops.PhpError as e:
+            raise HTTPException(500, str(e)) from e
+        _log(conn, user, "site.php-ext-disable", f"{row['domain']}: {req.extension}")
+    return {"ok": True, "extension": req.extension, "enabled": False}
+
+@app.post("/api/sites/{site_id}/php-extensions/install")
+def install_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
+    """Install PHP extension via apt for site's PHP version."""
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
+            raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
+        try:
+            php_ops.install_extension(row["php_version"], req.extension)
+        except php_ops.PhpError as e:
+            raise HTTPException(500, str(e)) from e
+        _log(conn, user, "site.php-ext-install", f"{row['domain']}: {req.extension}")
+    return {"ok": True, "extension": req.extension, "installed": True}
+
+
 # ------------------------------------------------------- domain tambahan
 
 def _add_domain_db(conn, site_id: int, domain: str) -> None:
