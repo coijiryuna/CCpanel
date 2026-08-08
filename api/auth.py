@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from .deps import _log, app, create_token, get_db, require_auth
+from .deps import _client_ip, _log, app, create_token, get_db, require_auth
 
 class LoginRequest(BaseModel):
     username: str
@@ -16,15 +16,16 @@ class TokenResponse(BaseModel):
     expires_in: int
 
 @app.post("/api/login", response_model=TokenResponse)
-def login(req: LoginRequest) -> TokenResponse:
+def login(req: LoginRequest, request: Request) -> TokenResponse:
+    ip = _client_ip(request)
     with get_db() as conn:
         row = conn.execute(
             "SELECT password_hash FROM users WHERE username = ?", (req.username,)
         ).fetchone()
     if row is None or not bcrypt.checkpw(req.password.encode(), row["password_hash"].encode()):
-        _log(None, req.username, "login", "gagal")
+        _log(None, {"username": req.username, "ip": ip}, "login", "gagal")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Wrong username or password")
-    _log(None, req.username, "login", "sukses")
+    _log(None, {"username": req.username, "ip": ip}, "login", "sukses")
     return TokenResponse(token=create_token(req.username), expires_in=3600 * 12)
 
 @app.get("/api/me")

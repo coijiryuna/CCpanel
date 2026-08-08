@@ -14,20 +14,20 @@ def appstore_list(_=Depends(require_auth), db=Depends(get_db)):
 
 
 @app.post("/api/appstore/{item_id}/install")
-def appstore_install(item_id: str, _=Depends(require_auth), db=Depends(get_db)):
+def appstore_install(item_id: str, user: dict = Depends(require_auth), db=Depends(get_db)):
     try:
         res = store.install(item_id)
     except store.AppStoreError as e:
         raise HTTPException(400, str(e))
-    _log(db, "appstore", f"install {item_id}")
+    _log(db, user, "appstore.install", item_id)
     return res
 
 
 @app.post("/api/appstore/{item_id}/uninstall")
-def appstore_uninstall(item_id: str, _=Depends(require_auth), db=Depends(get_db)):
+def appstore_uninstall(item_id: str, user: dict = Depends(require_auth), db=Depends(get_db)):
     try:
         res = store.uninstall(item_id)
     except store.AppStoreError as e:
         raise HTTPException(400, str(e))
-    _log(db, "appstore", f"uninstall {item_id}")
+    _log(db, user, "appstore.uninstall", item_id)
     return res

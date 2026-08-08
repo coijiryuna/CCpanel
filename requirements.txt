@@ -5,3 +5,4 @@ pyjwt>=2.8
 bcrypt>=4.1
 python-multipart>=0.0.9
 httpx>=0.27   # dev: TestClient
+redis>=5.0    # opsional: live Redis db0-db15 overview

@@ -14,5 +14,6 @@
     "**/static/**",
     "**/__pycache__/**"
   ],
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.pythonPath": ".venv/bin/python3.13"
 }

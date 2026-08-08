@@ -4,17 +4,7 @@ Jalankan:
 """
 import os
 import sys
-import tempfile
 from pathlib import Path
-
-# override env SEBELUM import core — path pakai env var saat import
-_tmp = tempfile.mkdtemp(prefix="ccp-proj-test-")
-os.environ["CCPANEL_SYSTEMD_DIR"] = str(Path(_tmp) / "systemd")
-os.environ["CCPANEL_PROJECT_ROOT"] = str(Path(_tmp) / "project")
-os.environ["CCPANEL_WWW_ROOT"] = str(Path(_tmp) / "www")
-os.environ["CCPANEL_NGINX_CONF_DIR"] = str(Path(_tmp) / "conf")
-os.environ["CCPANEL_TRASH_DIR"] = str(Path(_tmp) / "trash")
-os.environ["CCPANEL_DOCKER_BIN"] = "echo"  # fake docker: echo selalu sukses
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -23,7 +13,7 @@ from core import nginx as nginx_ops
 
 
 def test_standalone_unit_node():
-    root = apps_ops.create_standalone("api-gateway", "node", 8201, "index.js")
+    root = apps_ops.create_standalone("api-gateway", "node", 8201, "index.js", go_version="")
     assert root == apps_ops.project_root("api-gateway")
     assert root.is_dir()
     unit = Path(os.environ["CCPANEL_SYSTEMD_DIR"]) / apps_ops.standalone_unit_name("api-gateway")
@@ -45,7 +35,7 @@ def test_standalone_name_validation():
 
 
 def test_standalone_pm2_cmd():
-    root = apps_ops.create_standalone("pm2-svc", "node", 8202, "app.js", pm2=True,
+    root = apps_ops.create_standalone("pm2-svc", "node", 8202, "app.js", pm2=True, go_version="",
                                       run_opt="npm run prod", user="appuser")
     unit = Path(os.environ["CCPANEL_SYSTEMD_DIR"]) / apps_ops.standalone_unit_name("pm2-svc")
     text = unit.read_text()
@@ -54,7 +44,7 @@ def test_standalone_pm2_cmd():
 
 
 def test_standalone_node_version_path():
-    root = apps_ops.create_standalone("nvm-svc", "node", 8205, "index.js",
+    root = apps_ops.create_standalone("nvm-svc", "node", 8205, "index.js", go_version="",
                                       node_version="v22")
     unit = Path(os.environ["CCPANEL_SYSTEMD_DIR"]) / apps_ops.standalone_unit_name("nvm-svc")
     text = unit.read_text()
@@ -62,14 +52,14 @@ def test_standalone_node_version_path():
 
 
 def test_standalone_python_bind_localhost():
-    root = apps_ops.create_standalone("py-api", "python", 8203, "app:app")
+    root = apps_ops.create_standalone("py-api", "python", 8203, "app:app", go_version="")
     unit = Path(os.environ["CCPANEL_SYSTEMD_DIR"]) / apps_ops.standalone_unit_name("py-api")
     text = unit.read_text()
     assert "gunicorn app:app --bind 127.0.0.1:8203" in text
 
 
 def test_standalone_remove():
-    apps_ops.create_standalone("to-remove", "node", 8204, "index.js")
+    apps_ops.create_standalone("to-remove", "node", 8204, "index.js", go_version="")
     apps_ops.remove_standalone("to-remove", "node")
     assert not (Path(os.environ["CCPANEL_SYSTEMD_DIR"]) / apps_ops.standalone_unit_name("to-remove")).exists()
 
@@ -78,6 +68,128 @@ def test_standalone_status_pid():
     # systemctl asli tidak ada di env test — status harus tidak crash
     st = apps_ops.standalone_status("missing-proj", "node")
     assert "state" in st and "pid" in st
+
+# ----------------------------------------------------------------- auto deps
+
+def _write_project_files(root: Path, files: dict[str, str]) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    for name, content in files.items():
+        (root / name).write_text(content, encoding="utf-8")
+
+def test_resolve_entry_node_package_main(monkeypatch):
+    root = apps_ops.project_root("detect-main")
+    _write_project_files(root, {"package.json": '{"name":"x","main":"src/server.js","scripts":{"start":"node src/server.js"}}'})
+    assert apps_ops.resolve_entry("node", root, "") == "src/server.js"
+    assert apps_ops.resolve_entry("node", root, "auto") == "src/server.js"
+
+def test_resolve_entry_node_scripts_start(monkeypatch):
+    root = apps_ops.project_root("detect-start")
+    _write_project_files(root, {"package.json": '{"name":"x","scripts":{"start":"node app.js"}}'})
+    assert apps_ops.resolve_entry("node", root, "") == "app.js"
+
+def test_resolve_entry_python(monkeypatch):
+    root = apps_ops.project_root("detect-py")
+    _write_project_files(root, {"app.py": "print(1)"})
+    assert apps_ops.resolve_entry("python", root, "") == "app:app"
+    root2 = apps_ops.project_root("detect-py2")
+    _write_project_files(root2, {"main.py": "print(1)"})
+    assert apps_ops.resolve_entry("python", root2, "") == "main:app"
+
+def test_install_deps_node_uses_npm_ci_when_lock(monkeypatch):
+    root = apps_ops.project_root("auto-npm-ci")
+    _write_project_files(root, {
+        "package.json": '{"name":"x","dependencies":{"express":"^4"}}',
+        "package-lock.json": "{}",
+    })
+    calls: list[list[str]] = []
+    def fake_run(cmd, cwd=None, timeout=600):
+        calls.append(cmd)
+        return apps_ops.subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(apps_ops, "_run_in", fake_run)
+    apps_ops._install_deps("node", root, "www")
+    assert any("npm ci" in " ".join(c) for c in calls)
+    # lock tidak ada -> npm install
+    root2 = apps_ops.project_root("auto-npm-install")
+    _write_project_files(root2, {"package.json": '{"name":"x","dependencies":{"express":"^4"}}'})
+    calls.clear()
+    apps_ops._install_deps("node", root2, "www")
+    assert any("npm install" in " ".join(c) for c in calls)
+
+def test_install_deps_node_skips_when_node_modules(monkeypatch):
+    root = apps_ops.project_root("auto-npm-skip")
+    _write_project_files(root, {"package.json": '{"name":"x","dependencies":{"express":"^4"}}'})
+    (root / "node_modules").mkdir()
+    calls: list[list[str]] = []
+    def fake_run(cmd, cwd=None, timeout=600):
+        calls.append(cmd)
+        return apps_ops.subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(apps_ops, "_run_in", fake_run)
+    apps_ops._install_deps("node", root, "www")
+    assert calls == []
+
+def test_install_deps_go_builds_binary(monkeypatch):
+    root = apps_ops.project_root("auto-go")
+    _write_project_files(root, {"go.mod": "module x\n"})
+    calls: list[list[str]] = []
+    def fake_run(cmd, cwd=None, timeout=600):
+        calls.append(cmd)
+        return apps_ops.subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(apps_ops, "_run_in", fake_run)
+    apps_ops._install_deps("go", root, "www")
+    assert calls and calls[-1][:3] == ["go", "build", "-o"]
+    assert calls[-1][3] == "auto-go"
+
+def test_install_deps_python_requirements(monkeypatch):
+    root = apps_ops.project_root("auto-py")
+    _write_project_files(root, {"requirements.txt": "requests\n"})
+    calls: list[list[str]] = []
+    def fake_run(cmd, cwd=None, timeout=600):
+        calls.append(cmd)
+        return apps_ops.subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(apps_ops, "_run_in", fake_run)
+    apps_ops._install_deps("python", root, "www")
+    assert calls and calls[0][:2] == ["pip", "install"]
+
+def test_install_deps_empty_dir_skips(monkeypatch):
+    root = apps_ops.project_root("auto-empty")
+    root.mkdir(parents=True, exist_ok=True)
+    calls: list[list[str]] = []
+    def fake_run(cmd, cwd=None, timeout=600):
+        calls.append(cmd)
+        return apps_ops.subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(apps_ops, "_run_in", fake_run)
+    apps_ops._install_deps("node", root, "www")
+    assert calls == []
+
+# ----------------------------------------------------------------- unit cmd
+
+def _fake_systemctl_success(monkeypatch):
+    def fake(cmd, cwd=None, timeout=600):
+        return apps_ops.subprocess.CompletedProcess(["systemctl", *cmd], 0, "", "")
+    monkeypatch.setattr(apps_ops, "systemctl", fake)
+
+def test_standalone_node_npm_start_cmd(monkeypatch):
+    _fake_systemctl_success(monkeypatch)
+    root = apps_ops.project_root("npm-start-app")
+    _write_project_files(root, {"package.json": '{"name":"x","scripts":{"start":"node server.js"}}'})
+    apps_ops.create_standalone("npm-start-app", "node", 8210, "", go_version="")
+    unit = Path(os.environ["CCPANEL_SYSTEMD_DIR"]) / apps_ops.standalone_unit_name("npm-start-app")
+    text = unit.read_text()
+    assert "ExecStart=/usr/bin/env npm start" in text
+
+def test_standalone_go_binary_cmd(monkeypatch):
+    _fake_systemctl_success(monkeypatch)
+    root = apps_ops.project_root("go-bin-app")
+    _write_project_files(root, {
+        "go.mod": "module gobinapp\n\ngo 1.21\n",
+        "main.go": "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hi\") }\n",
+    })
+    apps_ops.create_standalone("go-bin-app", "go", 8211, "auto", go_version="")
+    unit = Path(os.environ["CCPANEL_SYSTEMD_DIR"]) / apps_ops.standalone_unit_name("go-bin-app")
+    text = unit.read_text()
+    assert f"ExecStart=/usr/bin/env ./go-bin-app" in text
+    # binary hasil build harus ada
+    assert (root / "go-bin-app").exists()
 
 
 def test_project_vhost_proxy():

@@ -22,33 +22,39 @@ async function renewSsl() {
 </script>
 
 <template>
-  <div class="layout">
-    <aside class="sidebar">
-      <h2>CCPanel</h2>
-      <nav>
-        <RouterLink to="/">Dashboard</RouterLink>
-        <RouterLink to="/sites">Websites</RouterLink>
-        <RouterLink to="/projects">Projects</RouterLink>
-        <RouterLink to="/appstore">App Store</RouterLink>
-        <RouterLink to="/files">Files</RouterLink>
-        <RouterLink to="/files-generic">File Manager Global</RouterLink>
-        <RouterLink to="/databases">Databases</RouterLink>
-        <RouterLink v-if="isAdmin" to="/trash">Trash</RouterLink>
-        <RouterLink v-if="isAdmin" to="/logs">Logs</RouterLink>
-        <RouterLink v-if="isAdmin" to="/terminal">Terminal</RouterLink>
-        <RouterLink v-if="isAdmin" to="/backup">Backup</RouterLink>
-        <RouterLink to="/ftp">FTP</RouterLink>
-        <RouterLink v-if="isAdmin" to="/settings">Settings</RouterLink>
-        <RouterLink v-if="isAdmin" to="/users">Users</RouterLink>
-      </nav>
-      <button v-if="isAdmin" class="logout" @click="renewSsl">Renew SSL</button>
-      <button class="logout" @click="doLogout">Logout</button>
-    </aside>
+  <div class="fade w-full h-full">
+    <div class="min-h-screen bg-slate-50 flex h-screen">
 
-    <main class="content">
-      <RouterView />
-    </main>
+      <aside class="sidebar">
+        <h2>CCPanel</h2>
+        <nav>
+          <RouterLink to="/">Dashboard</RouterLink>
+          <RouterLink to="/sites">Websites</RouterLink>
+          <RouterLink to="/projects">Projects</RouterLink>
+          <RouterLink to="/ports">Ports</RouterLink>
+
+
+          <RouterLink to="/appstore">App Store</RouterLink>
+          <RouterLink to="/files">Files</RouterLink>
+          <RouterLink to="/files-generic">File Manager Global</RouterLink>
+          <RouterLink to="/databases">Databases</RouterLink>
+          <RouterLink v-if="isAdmin" to="/trash">Trash</RouterLink>
+          <RouterLink v-if="isAdmin" to="/logs">Logs</RouterLink>
+          <RouterLink v-if="isAdmin" to="/terminal">Terminal</RouterLink>
+          <RouterLink v-if="isAdmin" to="/backup">Backup</RouterLink>
+          <RouterLink to="/ftp">FTP</RouterLink>
+          <RouterLink v-if="isAdmin" to="/settings">Settings</RouterLink>
+          <RouterLink v-if="isAdmin" to="/users">Users</RouterLink>
+        </nav>
+        <button v-if="isAdmin" class="logout" @click="renewSsl">Renew SSL</button>
+        <button class="logout" @click="doLogout">Logout</button>
+      </aside>
+
+      <main class="content">
+        <RouterView />
+      </main>
+    </div>
+
+    <AppToast />
   </div>
-
-  <AppToast />
 </template>

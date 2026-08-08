@@ -15,6 +15,9 @@ from .deps import (
     app,
     app_state,
     check_site_access,
+    dt_order,
+    dt_params,
+    dt_response,
     get_db,
     require_auth,
     validate_subpath,
@@ -70,12 +73,37 @@ def _check_nginx(row) -> None:
     if row["webserver"] != "nginx":
         raise HTTPException(400, f"Aplikasi hanya untuk site nginx (site ini: {row['webserver']})")
 
-@app.get("/api/sites/{site_id}/apps", response_model=list[AppResponse])
-def list_apps(site_id: int, user: dict = Depends(require_auth)) -> list[AppResponse]:
+@app.get("/api/sites/{site_id}/apps", response_model=list[AppResponse] | dict)
+def list_apps(
+    site_id: int,
+    start: int = 0,
+    length: int = 0,
+    draw: int = 0,
+    search: str | None = None,
+    order_col: str | None = None,
+    order_dir: str = "asc",
+    user: dict = Depends(require_auth),
+) -> list[AppResponse] | dict:
+    start, length, draw = dt_params(start, length, draw)
     with get_db() as conn:
         site = check_site_access(conn, site_id, user)
-        rows = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (site_id,)).fetchall()
-    return [_app_row(conn, r, site) for r in rows]
+        conds: list[str] = ["site_id = ?"]
+        args: list = [site_id]
+        if search:
+            s = f"%{search.strip()}%"
+            conds.append("(app_type LIKE ? OR name LIKE ? OR remark LIKE ?)")
+            args.extend([s, s, s])
+        where = " WHERE " + " AND ".join(conds)
+        total = conn.execute("SELECT COUNT(*) FROM site_apps WHERE site_id = ?", (site_id,)).fetchone()[0]
+        filtered = conn.execute("SELECT COUNT(*) FROM site_apps" + where, args).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM site_apps" + where
+            + dt_order(["id", "app_type", "port", "name", "created_at"], order_col, order_dir)
+            + (" LIMIT ? OFFSET ?" if length else ""),
+            args + ([length, start] if length else []),
+        ).fetchall()
+        out = [_app_row(conn, r, site) for r in rows]
+    return dt_response(out, start, length, total, filtered, draw)
 
 @app.post("/api/sites/{site_id}/apps", response_model=AppResponse)
 def create_app(site_id: int, req: AppCreate, user: dict = Depends(require_auth)) -> AppResponse:
@@ -121,6 +149,10 @@ def create_app(site_id: int, req: AppCreate, user: dict = Depends(require_auth))
 @app.get("/api/node/versions")
 def node_versions(user: dict = Depends(require_auth)) -> dict:
     return {"versions": apps_ops.node_versions()}
+
+@app.get("/api/go/versions")
+def go_versions(user: dict = Depends(require_auth)) -> dict:
+    return {"versions": apps_ops.go_versions()}
 
 @app.post("/api/sites/{site_id}/apps/action")
 async def app_action(site_id: int, req: Request, user: dict = Depends(require_auth)) -> dict:

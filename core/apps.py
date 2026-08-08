@@ -26,6 +26,7 @@ APP_TYPES = ["node", "python", "go", "docker"]
 DEFAULT_ENTRY = {"node": "index.js", "python": "app:app", "go": "app", "docker": "docker-compose.yml"}
 DEFAULT_USER = "www"
 NODE_VERSIONS = ["v22", "v20", "v18", "v16"]
+GO_VERSIONS = ["1.23", "1.22", "1.21", "1.20"]
 
 
 class AppError(Exception):
@@ -37,6 +38,103 @@ def _run(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
         raise AppError(f"Timeout: {' '.join(cmd)}") from e
+
+def _run_in(cmd: list[str], cwd: Path, timeout: int = 600) -> subprocess.CompletedProcess:
+    """Jalankan perintah di folder project (install deps dll, lama)."""
+    try:
+        return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise AppError(f"Perintah tidak ditemukan: {cmd[0]}")
+    except subprocess.TimeoutExpired as e:
+        raise AppError(f"Timeout: {' '.join(cmd)}") from e
+
+def _node_env_prefix(node_version: str) -> str:
+    """Prefix PATH versi node via nvm (sama seperti _cmdline)."""
+    if node_version:
+        return f"export PATH=$HOME/.nvm/versions/node/{node_version}/bin:$PATH && "
+    return ""
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        import json
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+def resolve_entry(app_type: str, root: Path, entry: str) -> str:
+    """Auto-detect entry kalau kosong/"auto":
+    node   — package.json main -> scripts.start -> entry manual
+    python — app.py -> main.py -> wsgi.py
+    go     — entry manual (binary hasil build)
+    """
+    e = (entry or "").strip()
+    if e and e != "auto":
+        return e
+    if app_type == "node":
+        pkg = _read_json(root / "package.json")
+        if pkg:
+            if pkg.get("main"):
+                return str(pkg["main"])
+            start = (pkg.get("scripts") or {}).get("start")
+            if start:
+                return re.sub(r"^node\s+", "", start.strip()).strip() or "index.js"
+        return "index.js"
+    if app_type == "python":
+        for cand, entry_val in (("app.py", "app:app"), ("main.py", "main:app"), ("wsgi.py", "wsgi:application")):
+            if (root / cand).exists():
+                return entry_val
+        return "app:app"
+    return entry or "app"
+
+def _install_deps(app_type: str, root: Path, run_user: str, node_version: str = "") -> None:
+    """Install dependensi otomatis sebelum start:
+    node   — npm install (npm ci kalau ada package-lock.json)
+    python — pip install -r requirements.txt
+    go     — go build -o <name> (pakai nama folder sebagai binary)
+    Skip kalau folder kosong, sudah terinstall, atau perintah tak ada.
+    """
+    if not any(root.iterdir()):
+        return
+    if app_type == "node":
+        if not (root / "package.json").exists():
+            return
+        if (root / "node_modules").exists():
+            return
+        pkg = _read_json(root / "package.json")
+        if not pkg or not (pkg.get("dependencies") or pkg.get("devDependencies")):
+            return
+        env = _node_env_prefix(node_version)
+        lock = root / "package-lock.json"
+        npm = "npm ci" if lock.exists() else "npm install"
+        res = _run_in(["bash", "-lc", f"cd {root} && {env} {npm}"], root, timeout=900)
+        if res.returncode != 0:
+            raise AppError(res.stderr.strip() or f"{npm} gagal")
+    elif app_type == "python":
+        req = root / "requirements.txt"
+        if not req.exists():
+            return
+        # cek venv project dulu, fallback pip
+        venv_pip = root / ".venv" / "bin" / "pip"
+        cmd = [str(venv_pip), "install", "-r", str(req)] if venv_pip.exists() else ["pip", "install", "-r", str(req)]
+        res = _run_in(cmd, root, timeout=900)
+        if res.returncode != 0:
+            raise AppError(res.stderr.strip() or "pip install -r requirements.txt gagal")
+    elif app_type == "go":
+        if not (root / "go.mod").exists():
+            return
+        if (root / "go.sum").exists():
+            res = _run_in(["go", "mod", "download"], root, timeout=900)
+            if res.returncode != 0:
+                raise AppError(res.stderr.strip() or "go mod download gagal")
+        bin_name = root.name
+        res = _run_in(["go", "build", "-o", bin_name, "."], root, timeout=900)
+        if res.returncode != 0:
+            raise AppError(res.stderr.strip() or "go build gagal")
+
+def _prepare_project(app_type: str, root: Path, run_user: str, node_version: str = "") -> None:
+    """Siapkan folder project: buat kalau belum ada + install deps."""
+    root.mkdir(parents=True, exist_ok=True)
+    _install_deps(app_type, root, run_user, node_version)
 
 
 def unit_name(domain: str) -> str:
@@ -69,6 +167,39 @@ def node_versions() -> list[str]:
     return NODE_VERSIONS
 
 
+def go_versions() -> list[str]:
+    """Deteksi versi Go terinstall: sdk dir dulu, fallback GO_VERSIONS."""
+    # Common Go install paths
+    paths = [
+        Path("/usr/local/go"),
+        Path("/opt/go"),
+        Path(os.path.expanduser("~/go")),
+        Path(os.path.expanduser("~/.go")),
+    ]
+    for p in paths:
+        if p.is_dir():
+            # Check for version in directory name or version file
+            version_file = p / "VERSION"
+            if version_file.exists():
+                try:
+                    v = version_file.read_text().strip().split('\n')[0]  # first line only
+                    if v.startswith("go"):
+                        return [v[2:]]  # strip "go" prefix
+                except Exception:
+                    pass
+    # Fallback: try `go version` command
+    try:
+        res = subprocess.run(["go", "version"], capture_output=True, text=True, timeout=5)
+        if res.returncode == 0:
+            # go version go1.23.0 linux/amd64
+            m = re.search(r"go(\d+\.\d+(?:\.\d+)?)", res.stdout)
+            if m:
+                return [m.group(1)]
+    except Exception:
+        pass
+    return GO_VERSIONS
+
+
 def _unit_path(domain: str) -> Path:
     return SYSTEMD_DIR / unit_name(domain)
 
@@ -80,7 +211,7 @@ def _compose_file(root: Path) -> Path:
 # ------------------------------------------------------------- unit content
 
 def _cmdline(app_type: str, root: Path, entry: str, port: int, run_opt: str = "",
-             pm2: bool = False, name: str = "", node_version: str = "") -> str:
+             pm2: bool = False, name: str = "", node_version: str = "", go_version: str = "") -> str:
     if app_type == "node":
         # PM2: pm2 start <entry> --name <name> -- <run_opt>; env NODE_PATH versi node
         if pm2:
@@ -89,10 +220,14 @@ def _cmdline(app_type: str, root: Path, entry: str, port: int, run_opt: str = ""
             if run_opt:
                 cmd += f" -- {run_opt}"
             return cmd
-        # node versi via nvm PATH (kalau ada), default node
-        env = ""
-        if node_version:
-            env = f"export PATH=$HOME/.nvm/versions/node/{node_version}/bin:$PATH && "
+        env = _node_env_prefix(node_version)
+        # kalau package.json punya scripts.start -> npm start (deps terinstall otomatis)
+        pkg = _read_json(root / "package.json")
+        if pkg and (pkg.get("scripts") or {}).get("start"):
+            cmd = "/usr/bin/env npm start"
+            if run_opt:
+                cmd += f" -- {run_opt}"
+            return env + cmd
         cmd = f"/usr/bin/env node {entry}"
         if run_opt:
             cmd += f" {run_opt}"
@@ -100,7 +235,17 @@ def _cmdline(app_type: str, root: Path, entry: str, port: int, run_opt: str = ""
     if app_type == "python":
         return f"/usr/bin/env gunicorn {entry} --bind 127.0.0.1:{port}"
     if app_type == "go":
-        return str((root / entry).resolve())
+        # go versi via GOROOT/GOPATH atau PATH
+        env = ""
+        if go_version:
+            # Try common Go install paths
+            env = f"export PATH=/usr/local/go/bin:/opt/go/bin:$HOME/go/bin:$PATH && "
+        # binary hasil build otomatis (nama = folder), atau entry manual user
+        bin_name = entry if (root / entry).exists() and entry != root.name else root.name
+        cmd = f"/usr/bin/env ./{bin_name}"
+        if run_opt:
+            cmd += f" {run_opt}"
+        return env + cmd
     raise AppError(f"app_type tidak valid: {app_type}")
 
 
@@ -124,15 +269,15 @@ WantedBy=multi-user.target
 
 def _write_unit(domain: str, root: Path, app_type: str, port: int, entry: str,
                 user: str = DEFAULT_USER, run_opt: str = "", pm2: bool = False,
-                name: str = "", node_version: str = "") -> None:
+                name: str = "", node_version: str = "", go_version: str = "") -> None:
     _write_unit_to(_unit_path(domain), domain, root, app_type, port, entry,
-                   user, run_opt, pm2, name, node_version)
+                   user, run_opt, pm2, name, node_version, go_version)
 
 def _write_unit_to(path: Path, label: str, root: Path, app_type: str, port: int,
                    entry: str, user: str, run_opt: str, pm2: bool, name: str,
-                   node_version: str) -> None:
+                   node_version: str, go_version: str = "") -> None:
     SYSTEMD_DIR.mkdir(parents=True, exist_ok=True)
-    cmd = _cmdline(app_type, root, entry, port, run_opt, pm2, name, node_version)
+    cmd = _cmdline(app_type, root, entry, port, run_opt, pm2, name, node_version, go_version)
     path.write_text(
         UNIT_TEMPLATE.format(domain=label, app_type=app_type, root=root, port=port,
                              cmd=cmd, user=user)
@@ -147,7 +292,7 @@ def systemctl(*args: str) -> subprocess.CompletedProcess:
 
 def create_app(domain: str, root: Path, app_type: str, port: int, entry: str,
                user: str = DEFAULT_USER, run_opt: str = "", pm2: bool = False,
-               name: str = "", node_version: str = "") -> None:
+               name: str = "", node_version: str = "", go_version: str = "") -> None:
     """Tulis unit (systemd) atau siapkan compose (docker), lalu start."""
     if app_type not in APP_TYPES:
         raise AppError(f"app_type tidak valid. Pilihan: {', '.join(APP_TYPES)}")
@@ -160,22 +305,19 @@ def create_app(domain: str, root: Path, app_type: str, port: int, entry: str,
         if res.returncode != 0:
             raise AppError(res.stderr.strip() or "docker compose up gagal")
         return
-    # node/python/go: tulis unit systemd
-    if app_type == "go":
-        bin_path = root / entry
-        if not bin_path.exists():
-            raise AppError(f"Binary {entry} tidak ada di {root}")
-        bin_path.chmod(0o755)
+    # node/python/go: siapkan deps dulu, lalu tulis unit systemd
+    _prepare_project(app_type, root, user, node_version)
+    if app_type == "go" and not (root / entry).exists() and not (root / root.name).exists():
+        raise AppError(f"Binary {entry} tidak ada di {root} (atau go.mod untuk build otomatis)")
     _do_create(_unit_path(domain), domain, root, app_type, port, entry,
-               user, run_opt, pm2, name, node_version)
+               user, run_opt, pm2, name, node_version, go_version)
 
 def create_standalone(name: str, app_type: str, port: int, entry: str,
                       user: str = DEFAULT_USER, run_opt: str = "", pm2: bool = False,
-                      node_version: str = "") -> Path:
+                      node_version: str = "", go_version: str = "") -> Path:
     """Pasang project standalone (tanpa domain): unit ccpanel-proj-<name>.
     Folder PROJECT_ROOT/<name> dibuat kalau belum ada. Return root path."""
     root = project_root(name)
-    root.mkdir(parents=True, exist_ok=True)
     if app_type not in APP_TYPES:
         raise AppError(f"app_type tidak valid. Pilihan: {', '.join(APP_TYPES)}")
     if not 1 <= port <= 65535:
@@ -187,20 +329,19 @@ def create_standalone(name: str, app_type: str, port: int, entry: str,
         if res.returncode != 0:
             raise AppError(res.stderr.strip() or "docker compose up gagal")
         return root
-    if app_type == "go":
-        bin_path = root / entry
-        if not bin_path.exists():
-            raise AppError(f"Binary {entry} tidak ada di {root}")
-        bin_path.chmod(0o755)
+    # siapkan folder + install deps sebelum unit di-start
+    _prepare_project(app_type, root, user, node_version)
+    if app_type == "go" and not (root / entry).exists() and not (root / root.name).exists():
+        raise AppError(f"Binary {entry} tidak ada di {root} (atau go.mod untuk build otomatis)")
     _do_create(_standalone_unit_path(name), name, root, app_type, port, entry,
-               user, run_opt, pm2, name, node_version)
+               user, run_opt, pm2, name, node_version, go_version)
     return root
 
 def _do_create(path: Path, label: str, root: Path, app_type: str, port: int,
                entry: str, user: str, run_opt: str, pm2: bool, name: str,
-               node_version: str) -> None:
+               node_version: str, go_version: str = "") -> None:
     _write_unit_to(path, label, root, app_type, port, entry, user, run_opt, pm2,
-                   name, node_version)
+                   name, node_version, go_version)
     res = systemctl("daemon-reload")
     if res.returncode != 0:
         raise AppError(res.stderr.strip() or "systemctl daemon-reload gagal")

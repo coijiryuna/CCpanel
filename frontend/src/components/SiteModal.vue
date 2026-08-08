@@ -7,7 +7,7 @@ const { notify } = useToast()
 const emit = defineEmits(['created'])
 
 const showModal = ref(false)
-const PROJECT_TYPES = ['static', 'php', 'node', 'python', 'go', 'docker']
+const PROJECT_TYPES = ['static', 'php']
 const PHP_VERSIONS = ref([])
 const CATEGORIES = ['', 'Blog', 'Toko Online', 'Company Profile', 'Portofolio', 'Landing Page', 'Lainnya']
 const newSite = ref({
@@ -39,6 +39,7 @@ function open() {
   error.value = ''
   showModal.value = true
 }
+
 function close() {
   showModal.value = false
   newSite.value = {
@@ -47,6 +48,7 @@ function close() {
     create_ftp: false, ftp_username: '', create_db: false, db_name: '', db_user: '', db_pass: '',
   }
 }
+
 async function createSite() {
   busy.value = true
   error.value = ''

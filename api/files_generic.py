@@ -8,6 +8,7 @@ Root path yang diizinkan:
 from __future__ import annotations
 
 import io
+import mimetypes
 import os
 import re
 import shutil
@@ -15,7 +16,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-from fastapi import Depends, File, HTTPException, UploadFile
+from fastapi import Depends, File, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -30,6 +31,8 @@ class FileEntry(BaseModel):
     path: str
     is_dir: bool
     size: int | None = None
+    mode: str | None = None   # oktal, mis. "755"
+    owner: str | None = None  # "user:group"
 
 class MkdirReq(BaseModel):
     path: str = ""
@@ -42,6 +45,19 @@ class RenameReq(BaseModel):
 class TextReq(BaseModel):
     path: str
     content: str
+
+class CompressReq(BaseModel):
+    path: str
+    name: str = ""  # nama arsip; kosong = <entry>.zip
+
+class BulkCompressReq(BaseModel):
+    paths: list[str]
+    dest: str = ""  # folder tujuan arsip (relatif root); kosong = root
+    name: str = ""  # nama arsip; kosong = bulk-<n>.zip
+
+class BulkCopyReq(BaseModel):
+    paths: list[str]
+    dest: str = ""  # folder tujuan (relatif root); kosong = root
 
 class ChmodReq(BaseModel):
     path: str
@@ -80,6 +96,28 @@ def _valid_name(name: str) -> str:
         raise HTTPException(400, "Nama tidak valid")
     return name
 
+_owner_cache: dict[tuple[int, int], str] = {}
+
+def _owner_name(uid: int, gid: int) -> str:
+    """uid:gid → nama (root:www). Unknown ID → tetap numerik. Hasil di-cache."""
+    key = (uid, gid)
+    cached = _owner_cache.get(key)
+    if cached is not None:
+        return cached
+    import grp
+    import pwd
+    try:
+        uname = pwd.getpwuid(uid).pw_name
+    except KeyError:
+        uname = str(uid)
+    try:
+        gname = grp.getgrgid(gid).gr_name
+    except KeyError:
+        gname = str(gid)
+    name = f"{uname}:{gname}"
+    _owner_cache[key] = name
+    return name
+
 @app.get("/api/files/{root_key}")
 def list_files_generic(root_key: str, path: str = "", user: dict = Depends(require_auth)) -> list[FileEntry]:
     """List isi folder di root yang diizinkan (wwwroot/project)."""
@@ -91,12 +129,15 @@ def list_files_generic(root_key: str, path: str = "", user: dict = Depends(requi
         raise HTTPException(400, "Bukan folder")
     entries = []
     for child in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        st = child.stat()
         entries.append(
             FileEntry(
                 name=child.name,
                 path=str(child.relative_to(root)),
                 is_dir=child.is_dir(),
-                size=child.stat().st_size if child.is_file() else None,
+                size=st.st_size if child.is_file() else None,
+                mode=oct(st.st_mode & 0o7777)[2:],
+                owner=_owner_name(st.st_uid, st.st_gid),
             )
         )
     return entries
@@ -192,15 +233,42 @@ def get_file_content_generic(root_key: str, path: str, user: dict = Depends(requ
         raise HTTPException(400, "File binary — tidak bisa diedit sebagai teks")
     return {"content": data.decode("utf-8", errors="replace")}
 
+@app.get("/api/files/{root_key}/preview")
+def preview_file_generic(root_key: str, path: str, user: dict = Depends(require_auth)):
+    """Stream file inline (gambar/pdf/video/audio) untuk preview di browser."""
+    root = _get_allowed_root(root_key)
+    target = _resolve_within(root, path)
+    if not target.is_file():
+        raise HTTPException(404, "File tidak ada")
+    media_type, _ = mimetypes.guess_type(target.name)
+    return FileResponse(
+        target,
+        media_type=media_type or "application/octet-stream",
+        headers={"Content-Disposition": "inline"},
+    )
+
+@app.head("/api/files/{root_key}/preview")
+def preview_file_head_generic(root_key: str, path: str, user: dict = Depends(require_auth)):
+    """HEAD — cek file ada tanpa transfer body (validasi preview murah)."""
+    root = _get_allowed_root(root_key)
+    target = _resolve_within(root, path)
+    if not target.is_file():
+        raise HTTPException(404, "File tidak ada")
+    return Response(status_code=200)
+
 @app.put("/api/files/{root_key}/content")
 def put_file_content_generic(root_key: str, req: TextReq, user: dict = Depends(require_auth)) -> dict:
     root = _get_allowed_root(root_key)
     target = _resolve_within(root, req.path)
-    if not target.is_file():
-        raise HTTPException(404, "File tidak ada")
     data = req.content.encode("utf-8")
     if len(data) > MAX_TEXT_SIZE:
         raise HTTPException(400, f"File > {MAX_TEXT_SIZE // 1024 // 1024} MB — terlalu besar")
+    if target.exists():
+        if not target.is_file():
+            raise HTTPException(400, "Bukan file")
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.touch()
     target.write_bytes(data)
     return {"ok": True}
 
@@ -252,6 +320,117 @@ def extract_archive_generic(root_key: str, path: str, user: dict = Depends(requi
         raise HTTPException(400, "File tar rusak") from None
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
+    return {"ok": True}
+
+# ---------------------------------------------------------------- compress
+
+@app.post("/api/files/{root_key}/compress")
+def compress_file_generic(root_key: str, req: CompressReq, user: dict = Depends(require_auth)) -> dict:
+    """Kompres entry (file/folder) → arsip .zip di folder yang sama."""
+    root = _get_allowed_root(root_key)
+    target = _resolve_within(root, req.path)
+    if not target.exists():
+        raise HTTPException(404, "Path tidak ada")
+    name = _valid_name(req.name) if req.name else target.name + ".zip"
+    if not name.lower().endswith(".zip"):
+        name += ".zip"
+    dest = target.parent / name
+    if dest.exists():
+        raise HTTPException(409, "Arsip sudah ada")
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+        base = target.name
+        if target.is_file():
+            zf.write(target, base)
+        else:
+            for p in sorted(target.rglob("*")):
+                if p.is_symlink() or p.is_dir():
+                    continue
+                zf.write(p, f"{base}/{p.relative_to(target)}")
+    return {"ok": True, "path": str(dest.relative_to(root))}
+
+# --------------------------------------------------------- compress massal
+
+@app.post("/api/files/{root_key}/compress-multi")
+def compress_multi_generic(root_key: str, req: BulkCompressReq, user: dict = Depends(require_auth)) -> dict:
+    """Kompres banyak entry → satu arsip .zip."""
+    root = _get_allowed_root(root_key)
+    if not req.paths:
+        raise HTTPException(400, "Tidak ada entry dipilih")
+    dest_dir = _resolve_within(root, req.dest) if req.dest else root
+    if not dest_dir.is_dir():
+        raise HTTPException(400, "Folder tujuan tidak ada")
+    name = _valid_name(req.name) if req.name else f"bulk-{req.paths[0].split('/')[-1]}.zip"
+    if not name.lower().endswith(".zip"):
+        name += ".zip"
+    dest = dest_dir / name
+    if dest.exists():
+        raise HTTPException(409, "Arsip sudah ada")
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel in req.paths:
+            p = _resolve_within(root, rel)
+            if not p.exists():
+                raise HTTPException(404, f"Entry tidak ada: {rel}")
+            if p.is_file():
+                zf.write(p, p.name)
+            else:
+                for f in sorted(p.rglob("*")):
+                    if f.is_symlink() or f.is_dir():
+                        continue
+                    zf.write(f, f"{p.name}/{f.relative_to(p)}")
+    return {"ok": True, "path": str(dest.relative_to(root))}
+
+# --------------------------------------------------------- copy / move massal
+
+def _unique_dest(dest: Path) -> Path:
+    """Kalau dest sudah ada → tambah suffix (1), (2), dst."""
+    if not dest.exists():
+        return dest
+    stem, suffix = dest.stem, dest.suffix
+    for i in range(1, 1000):
+        alt = dest.with_name(f"{stem} ({i}){suffix}")
+        if not alt.exists():
+            return alt
+    raise HTTPException(409, "Terlalu banyak duplikat")
+
+@app.post("/api/files/{root_key}/copy")
+def copy_files_generic(root_key: str, req: BulkCopyReq, user: dict = Depends(require_auth)) -> dict:
+    """Copy banyak entry ke folder tujuan. Konflik nama → auto rename."""
+    root = _get_allowed_root(root_key)
+    if not req.paths:
+        raise HTTPException(400, "Tidak ada entry dipilih")
+    dest_dir = _resolve_within(root, req.dest) if req.dest else root
+    if not dest_dir.is_dir():
+        raise HTTPException(400, "Folder tujuan tidak ada")
+    for rel in req.paths:
+        src = _resolve_within(root, rel)
+        if not src.exists():
+            raise HTTPException(404, f"Entry tidak ada: {rel}")
+        if src.parent == dest_dir:
+            continue
+        out = _unique_dest(dest_dir / src.name)
+        if src.is_dir():
+            shutil.copytree(src, out, symlinks=True)
+        else:
+            shutil.copy2(src, out)
+    return {"ok": True}
+
+@app.post("/api/files/{root_key}/move")
+def move_files_generic(root_key: str, req: BulkCopyReq, user: dict = Depends(require_auth)) -> dict:
+    """Pindah banyak entry ke folder tujuan."""
+    root = _get_allowed_root(root_key)
+    if not req.paths:
+        raise HTTPException(400, "Tidak ada entry dipilih")
+    dest_dir = _resolve_within(root, req.dest) if req.dest else root
+    if not dest_dir.is_dir():
+        raise HTTPException(400, "Folder tujuan tidak ada")
+    for rel in req.paths:
+        src = _resolve_within(root, rel)
+        if not src.exists():
+            raise HTTPException(404, f"Entry tidak ada: {rel}")
+        if src.parent == dest_dir:
+            continue
+        out = _unique_dest(dest_dir / src.name)
+        shutil.move(str(src), str(out))
     return {"ok": True}
 
 def _parse_mode(mode: str) -> int:
@@ -318,4 +497,29 @@ def download_file_generic(root_key: str, path: str, user: dict = Depends(require
         buf,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{base}.zip"'},
+    )
+
+@app.post("/api/files/{root_key}/download-multi")
+def download_multi_generic(root_key: str, req: BulkCompressReq, user: dict = Depends(require_auth)):
+    """Download banyak entry → satu zip streaming."""
+    root = _get_allowed_root(root_key)
+    if not req.paths:
+        raise HTTPException(400, "Tidak ada entry dipilih")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel in req.paths:
+            p = _resolve_within(root, rel)
+            if not p.exists():
+                raise HTTPException(404, f"Entry tidak ada: {rel}")
+            if p.is_file():
+                zf.write(p, p.name)
+            else:
+                for f in sorted(p.rglob("*")):
+                    if f.is_file():
+                        zf.write(f, f"{p.name}/{f.relative_to(p)}")
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="bulk-{req.paths[0].split("/")[-1]}.zip"'},
     )

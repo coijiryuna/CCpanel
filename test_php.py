@@ -3,14 +3,7 @@
 """
 import os
 import sys
-import tempfile
 from pathlib import Path
-
-# override env SEBELUM import core.php — path pakai env var saat import
-_tmp = tempfile.mkdtemp(prefix="ccp-php-test-")
-os.environ["CCPANEL_PHP_FPM_DIR"] = str(Path(_tmp) / "php")
-os.environ["CCPANEL_WWW_ROOT"] = str(Path(_tmp) / "www")
-os.environ["CCPANEL_NGINX_CONF_DIR"] = str(Path(_tmp) / "conf")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

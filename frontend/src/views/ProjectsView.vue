@@ -12,6 +12,7 @@ const DEFAULT_ENTRY = { node: 'index.js', python: 'app:app', go: 'app', docker: 
 const activeTab = ref('node')
 const projects = ref([])
 const nodeVersions = ref([])
+const goVersions = ref([])
 const showAdd = ref(false)
 const editId = ref(null)
 const logFor = ref(null) // { name, text }
@@ -20,7 +21,7 @@ const busy = ref(false)
 
 const form = ref({
   name: '', app_type: 'node', port: 8000, entry: '', run_opt: '',
-  user: 'www', node_version: '', pm2: false, remark: '', domain: '',
+  user: 'www', node_version: '', go_version: '', pm2: false, remark: '', domain: '',
   root_path: '',
 })
 
@@ -32,6 +33,10 @@ onMounted(async () => {
     const r = await api.get('/api/node/versions')
     nodeVersions.value = r.versions || []
   } catch { nodeVersions.value = [] }
+  try {
+    const r = await api.get('/api/go/versions')
+    goVersions.value = r.versions || []
+  } catch { goVersions.value = [] }
 })
 
 async function refresh() {
@@ -43,7 +48,7 @@ async function refresh() {
 function resetForm() {
   form.value = {
     name: '', app_type: activeTab.value, port: 8000, entry: '', run_opt: '',
-    user: 'www', node_version: '', pm2: false, remark: '', domain: '',
+    user: 'www', node_version: '', go_version: '', pm2: false, remark: '', domain: '',
   }
 }
 
@@ -58,7 +63,7 @@ function openEdit(p) {
   form.value = {
     name: p.name, app_type: p.app_type, port: p.port, entry: p.entry || '',
     run_opt: p.run_opt || '', user: p.user || 'www', node_version: p.node_version || '',
-    pm2: !!p.pm2, remark: p.remark || '', domain: p.domain || '',
+    go_version: p.go_version || '', pm2: !!p.pm2, remark: p.remark || '', domain: p.domain || '',
   }
   showAdd.value = true
 }
@@ -100,6 +105,7 @@ async function save() {
   busy.value = true
   try {
     const isNode = form.value.app_type === 'node'
+    const isGo = form.value.app_type === 'go'
     const payload = {
       app_type: form.value.app_type,
       port: Number(form.value.port),
@@ -107,6 +113,7 @@ async function save() {
       run_opt: isNode ? form.value.run_opt : '',
       user: form.value.user || 'www',
       node_version: isNode ? form.value.node_version : '',
+      go_version: isGo ? form.value.go_version : '',
       pm2: isNode && form.value.pm2,
       remark: form.value.remark,
     }
@@ -181,7 +188,9 @@ async function detachDomain(p) {
   <section>
     <div class="head">
       <h3>Projects <span class="dim">— backend tanpa domain (localhost:port), bisa dikaitkan domain langsung</span></h3>
-      <button class="primary" @click="openAdd">+ Tambah Project</button>
+      <div class="head-actions">
+        <button class="primary" @click="openAdd">+ Tambah Project</button>
+      </div>
     </div>
 
     <div class="tabs">
@@ -258,6 +267,13 @@ async function detachDomain(p) {
             <option v-for="v in nodeVersions" :key="v" :value="v">{{ v }}</option>
           </select>
         </div>
+        <div v-if="form.app_type === 'go'" class="field">
+          <label>Versi Go</label>
+          <select v-model="form.go_version">
+            <option value="">(default)</option>
+            <option v-for="v in goVersions" :key="v" :value="v">{{ v }}</option>
+          </select>
+        </div>
         <div v-if="form.app_type === 'node'" class="field">
           <label><input type="checkbox" v-model="form.pm2" /> Pakai PM2</label>
         </div>
@@ -308,3 +324,11 @@ async function detachDomain(p) {
     </div>
   </section>
 </template>
+
+<style scoped>
+.head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+</style>

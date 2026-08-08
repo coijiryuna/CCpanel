@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from core import ftp as ftp_ops
 
-from .deps import _log, app, get_db, require_auth
+from .deps import _log, app, dt_order, dt_params, dt_response, get_db, require_auth
 
 class FtpCreate(BaseModel):
     username: str
@@ -44,21 +44,44 @@ def _check_ftp_access(conn, ftp_id: int, user: dict):
         raise HTTPException(403, "Bukan akun Anda")
     return row
 
-@app.get("/api/ftp", response_model=list[FtpResponse])
-def list_ftp(user: dict = Depends(require_auth)) -> list[FtpResponse]:
+@app.get("/api/ftp", response_model=list[FtpResponse] | dict)
+def list_ftp(
+    start: int = 0,
+    length: int = 0,
+    draw: int = 0,
+    search: str | None = None,
+    order_col: str | None = None,
+    order_dir: str = "asc",
+    user: dict = Depends(require_auth),
+) -> list[FtpResponse] | dict:
+    start, length, draw = dt_params(start, length, draw)
+    base = "SELECT f.*, s.domain AS site_domain FROM ftp_accounts f "
+    conds: list[str] = []
+    args: list = []
+    if user["role"] == "admin":
+        join = "LEFT JOIN sites s ON s.id = f.site_id"
+    else:
+        join = "JOIN sites s ON s.id = f.site_id"
+        conds.append("s.owner_id = ?")
+        args.append(user["id"])
+    if search:
+        s = f"%{search.strip()}%"
+        conds.append("(f.username LIKE ? OR s.domain LIKE ?)")
+        args.extend([s, s])
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
     with get_db() as conn:
-        if user["role"] == "admin":
-            rows = conn.execute(
-                "SELECT f.*, s.domain AS site_domain FROM ftp_accounts f "
-                "LEFT JOIN sites s ON s.id = f.site_id ORDER BY f.id"
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT f.*, s.domain AS site_domain FROM ftp_accounts f "
-                "JOIN sites s ON s.id = f.site_id "
-                "WHERE s.owner_id = ? ORDER BY f.id", (user["id"],)
-            ).fetchall()
-    return [_ftp_row(r, r["site_domain"]) for r in rows]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM ftp_accounts"
+            + (f" WHERE site_id IN (SELECT id FROM sites WHERE owner_id = ?)" if user["role"] != "admin" else ""),
+            ([user["id"]] if user["role"] != "admin" else []),
+        ).fetchone()[0]
+        filtered = conn.execute("SELECT COUNT(*) FROM ftp_accounts f " + join + where, args).fetchone()[0]
+        rows = conn.execute(
+            base + join + where + dt_order(["f.id", "f.username", "s.domain", "f.created_at"], order_col, order_dir)
+            + (" LIMIT ? OFFSET ?" if length else ""),
+            args + ([length, start] if length else []),
+        ).fetchall()
+    return dt_response([_ftp_row(r, r["site_domain"]) for r in rows], start, length, total, filtered, draw)
 
 @app.post("/api/ftp", response_model=FtpResponse)
 def create_ftp(req: FtpCreate, user: dict = Depends(require_auth)) -> FtpResponse:

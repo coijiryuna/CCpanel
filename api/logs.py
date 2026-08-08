@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from core import terminal as terminal_ops
 
-from .deps import _log, app, get_db, require_admin
+from .deps import _log, app, dt_order, dt_params, dt_response, get_db, require_admin
 
 class LogEntry(BaseModel):
     id: int
@@ -14,16 +14,46 @@ class LogEntry(BaseModel):
     user: str
     action: str
     detail: str
+    ip: str = ""
 
-@app.get("/api/logs", response_model=list[LogEntry])
-def list_logs(limit: int = 100, user: dict = Depends(require_admin)) -> list[LogEntry]:
-    """Audit trail: aksi admin terbaru dulu. Batasi jumlah biar tidak berat."""
-    limit = max(1, min(limit, 500))
+@app.get("/api/logs", response_model=list[LogEntry] | dict)
+def list_logs(
+    start: int = 0,
+    length: int = 0,
+    draw: int = 0,
+    search: str | None = None,
+    order_col: str | None = None,
+    order_dir: str = "desc",
+    limit: int = 100,
+    user: dict = Depends(require_admin),
+) -> list[LogEntry] | dict:
+    """Audit trail: aksi admin terbaru dulu. DataTables: start+length; legacy: limit."""
+    start, length, draw = dt_params(start, length, draw)
+    conds: list[str] = []
+    args: list = []
+    if search:
+        s = f"%{search.strip()}%"
+        conds.append("(user LIKE ? OR action LIKE ? OR detail LIKE ? OR ip LIKE ?)")
+        args.extend([s, s, s, s])
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-    return [LogEntry(**dict(r)) for r in rows]
+        total = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+        filtered = conn.execute("SELECT COUNT(*) FROM audit_log" + where, args).fetchone()[0]
+        if length > 0:
+            rows = conn.execute(
+                "SELECT * FROM audit_log" + where
+                + dt_order(["id", "ts", "user", "action", "detail", "ip"], order_col, order_dir)
+                + " LIMIT ? OFFSET ?",
+                args + [length, start],
+            ).fetchall()
+        else:
+            # legacy: limit saja (tanpa offset) biar tetap backward compatible
+            lim = max(1, min(limit, 500))
+            rows = conn.execute(
+                "SELECT * FROM audit_log" + where + " ORDER BY id DESC LIMIT ?",
+                args + [lim],
+            ).fetchall()
+    return dt_response([LogEntry(**dict(r)) for r in rows], start, length, total, filtered, draw)
 
 class TerminalRequest(BaseModel):
     cmd: str

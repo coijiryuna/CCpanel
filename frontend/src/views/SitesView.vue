@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { api } from '../api.js'
 import { useToast } from '../composables/useToast.js'
 import SiteModal from '../components/SiteModal.vue'
-import AppManager from '../components/AppManager.vue'
 import VhostEditor from '../components/VhostEditor.vue'
 
 const { notify } = useToast()
@@ -14,7 +13,6 @@ const PROJECT_TABS = ['static', 'php']
 const activeTab = ref('static')
 
 const sites = ref([])
-const appm = ref(null) // ref ke AppManager untuk kelola aplikasi
 const vhe = ref(null) // ref ke VhostEditor untuk edit config
 
 function openFiles(site) {
@@ -118,23 +116,34 @@ onMounted(refresh)
       <SiteModal @created="refresh" />
     </div>
     <div class="tabs">
-      <button v-for="t in PROJECT_TABS" :key="t" class="tab" :class="{ active: activeTab === t }" @click="activeTab = t">
+      <button v-for="t in PROJECT_TABS" :key="t" class="tab" :class="{ active: activeTab === t }"
+        @click="activeTab = t">
         {{ t }}
       </button>
     </div>
     <table>
       <thead>
-        <tr><th>Domain</th><th>Port</th><th>PHP</th><th>Status</th><th>Deskripsi</th><th>Kategori</th><th>Aksi</th></tr>
+        <tr>
+          <th>Domain</th>
+          <th>Port</th>
+          <th>PHP</th>
+          <th>Status</th>
+          <th>Deskripsi</th>
+          <th>Kategori</th>
+          <th>Aksi</th>
+        </tr>
       </thead>
       <tbody>
         <tr v-for="s in visibleSites" :key="s.id">
           <td>
             {{ s.domain }}
-            <span v-for="d in s.extra_domains" :key="d" class="alias" :title="'Klik untuk lepas ' + d" @click="removeDomain(s, d)">+{{ d }}</span>
+            <span v-for="d in s.extra_domains" :key="d" class="alias" :title="'Klik untuk lepas ' + d"
+              @click="removeDomain(s, d)">+{{ d }}</span>
             <button class="link" @click="addDomain(s)" title="Tambah domain">+ alias</button>
           </td>
           <td>
-            <span v-if="s.port" :class="s.proxy_enabled ? 'badge on' : 'badge'">{{ s.port }} {{ s.proxy_enabled ? '(proxy)' : '' }}</span>
+            <span v-if="s.port" :class="s.proxy_enabled ? 'badge on' : 'badge'">{{ s.port }} {{ s.proxy_enabled ?
+              '(proxy)' : '' }}</span>
             <span v-else class="dim">—</span>
             <button class="link" @click="setPort(s)">ubah</button>
           </td>
@@ -149,19 +158,23 @@ onMounted(refresh)
           <td class="actions">
             <button @click="siteAction(s, 'enable')" :disabled="s.enabled">Enable</button>
             <button @click="siteAction(s, 'disable')" :disabled="!s.enabled">Disable</button>
-            <button @click="toggleProxy(s)" :class="s.proxy_enabled ? 'primary' : ''" :disabled="!s.port && !s.proxy_enabled" title="Proxy penuh: nginx listen port → app localhost">Proxy {{ s.proxy_enabled ? 'ON' : 'OFF' }}</button>
-            <button @click="siteAction(s, 'waf')" :class="s.waf_enabled ? 'primary' : ''" :title="s.waf_enabled ? 'WAF aktif — klik untuk nonaktif' : 'WAF nonaktif — klik untuk aktif'">WAF {{ s.waf_enabled ? 'ON' : 'OFF' }}</button>
+            <button @click="toggleProxy(s)" :class="s.proxy_enabled ? 'primary' : ''"
+              :disabled="!s.port && !s.proxy_enabled" title="Proxy penuh: nginx listen port → app localhost">Proxy {{
+                s.proxy_enabled ? 'ON' : 'OFF' }}</button>
+            <button @click="siteAction(s, 'waf')" :class="s.waf_enabled ? 'primary' : ''"
+              :title="s.waf_enabled ? 'WAF aktif — klik untuk nonaktif' : 'WAF nonaktif — klik untuk aktif'">WAF {{
+                s.waf_enabled ? 'ON' : 'OFF' }}</button>
             <button @click="siteAction(s, 'ssl')">SSL</button>
             <button @click="openFiles(s)">Files</button>
-            <button @click="appm.open(s)" :class="s.app ? 'primary' : ''">App {{ s.app ? s.app.app_type : 'Pasang' }}</button>
             <button @click="vhe.open(s)">Config</button>
             <button class="danger" @click="siteAction(s, 'delete')">Hapus</button>
           </td>
         </tr>
-        <tr v-if="!visibleSites.length"><td colspan="7" class="empty">Tidak ada site {{ activeTab }} — klik "+ Buat Site"</td></tr>
+        <tr v-if="!visibleSites.length">
+          <td colspan="7" class="empty">Tidak ada site {{ activeTab }} — klik "+ Buat Site"</td>
+        </tr>
       </tbody>
     </table>
-    <AppManager ref="appm" @changed="refresh" />
     <VhostEditor ref="vhe" @changed="refresh" />
 
     <div v-if="portModal" class="modal-backdrop" @click.self="portModal = null">

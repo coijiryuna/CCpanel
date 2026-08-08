@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from core import backup as backup_ops
 from core import webserver as webserver_ops
 
-from .deps import _log, app, get_db, require_admin
+from .deps import _log, app, dt_params, dt_response, get_db, require_admin
 
 class BackupItem(BaseModel):
     name: str
@@ -18,12 +18,34 @@ class BackupItem(BaseModel):
     size: int
     mtime: float
 
-@app.get("/api/backups", response_model=list[BackupItem])
-def list_backups(user: dict = Depends(require_admin)) -> list[BackupItem]:
+@app.get("/api/backups", response_model=list[BackupItem] | dict)
+def list_backups(
+    start: int = 0,
+    length: int = 0,
+    draw: int = 0,
+    search: str | None = None,
+    order_col: str | None = None,
+    order_dir: str = "asc",
+    user: dict = Depends(require_admin),
+) -> list[BackupItem] | dict:
+    start, length, draw = dt_params(start, length, draw)
     try:
-        return [BackupItem(**i) for i in backup_ops.list_backups()]
+        items = [BackupItem(**i) for i in backup_ops.list_backups()]
     except backup_ops.BackupError as e:
         raise HTTPException(500, str(e)) from e
+    if search:
+        s = search.strip().lower()
+        items = [i for i in items if s in i.name.lower() or s in i.type.lower()]
+    # sort in-memory: kolom whitelist, arah aman
+    col = (order_col or "").strip().lower()
+    if col.isdigit():
+        col = ["name", "type", "size", "mtime"][int(col)] if int(col) < 4 else "name"
+    if col not in ("name", "type", "size", "mtime"):
+        col = "name"
+    items.sort(key=lambda i: getattr(i, col), reverse=(order_dir or "").strip().lower() == "desc")
+    total = len(items)
+    page = items[start:start + length] if length else items
+    return dt_response(page, start, length, total, total, draw)
 
 @app.post("/api/backups/site/{site_id}")
 def backup_site(site_id: int, user: dict = Depends(require_admin)) -> dict:

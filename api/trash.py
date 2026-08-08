@@ -8,19 +8,41 @@ from pydantic import BaseModel
 
 from core import webserver as webserver_ops
 
-from .deps import _log, app, get_db, require_admin
+from .deps import _log, app, dt_params, dt_response, get_db, require_admin
 
 class TrashItem(BaseModel):
     name: str
     size: int
     mtime: float
 
-@app.get("/api/trash", response_model=list[TrashItem])
-def list_trash(user: dict = Depends(require_admin)) -> list[TrashItem]:
+@app.get("/api/trash", response_model=list[TrashItem] | dict)
+def list_trash(
+    start: int = 0,
+    length: int = 0,
+    draw: int = 0,
+    search: str | None = None,
+    order_col: str | None = None,
+    order_dir: str = "asc",
+    user: dict = Depends(require_admin),
+) -> list[TrashItem] | dict:
+    start, length, draw = dt_params(start, length, draw)
     try:
-        return [TrashItem(**i) for i in webserver_ops.trash_items()]
+        items = [TrashItem(**i) for i in webserver_ops.trash_items()]
     except webserver_ops.WebserverError as e:
         raise HTTPException(500, str(e)) from e
+    if search:
+        s = search.strip().lower()
+        items = [i for i in items if s in i.name.lower()]
+    # sort in-memory: kolom whitelist, arah aman
+    col = (order_col or "").strip().lower()
+    if col.isdigit():
+        col = ["name", "size", "mtime"][int(col)] if int(col) < 3 else "name"
+    if col not in ("name", "size", "mtime"):
+        col = "name"
+    items.sort(key=lambda i: getattr(i, col), reverse=(order_dir or "").strip().lower() == "desc")
+    total = len(items)
+    page = items[start:start + length] if length else items
+    return dt_response(page, start, length, total, total, draw)
 
 @app.post("/api/trash/{name}/restore")
 def restore_site(name: str, user: dict = Depends(require_admin)) -> dict:

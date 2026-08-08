@@ -4,17 +4,7 @@ Jalankan:
 """
 import os
 import sys
-import tempfile
 from pathlib import Path
-
-# override env SEBELUM import core
-_tmp = tempfile.mkdtemp(prefix="ccp-appstore-test-")
-os.environ["CCPANEL_APT"] = "echo"  # fake apt: echo selalu sukses
-os.environ["CCPANEL_NVM_DIR"] = str(Path(_tmp) / "nvm")
-os.environ["CCPANEL_GO_ROOT"] = str(Path(_tmp) / "go")
-os.environ["CCPANEL_APPSTORE_LOG"] = str(Path(_tmp) / "appstore.log")
-os.environ["CCPANEL_APPSTORE_CACHE"] = str(Path(_tmp) / "cache.json")
-os.environ.pop("CCPANEL_APPSTORE_URL", None)  # default: pakai statis
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

@@ -45,7 +45,6 @@ if not os.environ.get("CCPANEL_DATABASE"):
 # history mode) diserve index.html, bukan 404.
 if STATIC_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str):
         candidate = STATIC_DIR / full_path

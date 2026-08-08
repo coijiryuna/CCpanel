@@ -4,16 +4,7 @@ Jalankan:
 """
 import os
 import sys
-import tempfile
 from pathlib import Path
-
-# override env SEBELUM import core.apps — path pakai env var saat import
-_tmp = tempfile.mkdtemp(prefix="ccp-apps-test-")
-os.environ["CCPANEL_SYSTEMD_DIR"] = str(Path(_tmp) / "systemd")
-os.environ["CCPANEL_WWW_ROOT"] = str(Path(_tmp) / "www")
-os.environ["CCPANEL_NGINX_CONF_DIR"] = str(Path(_tmp) / "conf")
-os.environ["CCPANEL_TRASH_DIR"] = str(Path(_tmp) / "trash")
-os.environ["CCPANEL_DOCKER_BIN"] = "echo"  # fake docker: echo selalu sukses
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -27,7 +18,7 @@ def test_unit_create():
     root = webserver_ops.root_path(domain)
     root.mkdir(parents=True)
     (root / "index.js").write_text("console.log('x')")
-    apps_ops.create_app(domain, root, "node", 8111, "index.js")
+    apps_ops.create_app(domain, root, "node", 8111, "index.js", go_version="")
     unit = Path(os.environ["CCPANEL_SYSTEMD_DIR"]) / apps_ops.unit_name(domain)
     assert unit.exists()
     text = unit.read_text()

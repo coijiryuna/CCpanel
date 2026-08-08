@@ -5,12 +5,18 @@ from fastapi import Depends, HTTPException
 from pydantic import BaseModel
 
 from core import database as database_ops
+from core import monitor as monitor_ops
 from core import webserver as webserver_ops
 
 from .deps import _log, app, get_db, require_admin
 
 class WebserverSettings(BaseModel):
     engine: str
+
+@app.get("/api/server/info")
+def get_server_info(user: dict = Depends(require_admin)) -> dict:
+    """Info server: CPU, RAM, load, disk. Admin only — data host sensitif."""
+    return monitor_ops.server_info()
 
 @app.get("/api/settings/webserver")
 def get_webserver_settings(user: dict = Depends(require_admin)) -> dict:

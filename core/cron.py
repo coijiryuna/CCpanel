@@ -9,6 +9,8 @@ CCPANEL_CRON_LOG) supaya bisa diuji tanpa root.
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -45,6 +47,64 @@ fi
 class CronError(Exception):
     pass
 
+CUSTOM_MARKER = "ccpanel-custom"
+
+def custom_line(job: dict) -> str:
+    """Line crontab utk satu custom job, marker unik per id.
+    kind: command (mentah) | url (curl) | script (bash path)."""
+    job_id = job["id"]
+    schedule = job["schedule"]
+    cmd = job["command"]
+    kind = job.get("kind", "command")
+    if kind == "url":
+        cmd = f"curl -fsS --max-time 60 {shlex.quote(cmd)}"
+    elif kind == "script":
+        cmd = f"bash {shlex.quote(cmd)}"
+    return f"{schedule} {cmd}  # {CUSTOM_MARKER}-{job_id}"
+
+def _job_marker(job_id: int) -> str:
+    return f"{CUSTOM_MARKER}-{job_id}"
+
+def sync_custom(jobs: list[dict]) -> dict:
+    """Tulis ulang semua line custom di crontab, hapus yang tak ada di list.
+    jobs: [{id, kind, schedule, command}]. Idempoten."""
+    current = _current()
+    kept = [ln for ln in current.splitlines() if CUSTOM_MARKER not in ln]
+    lines = [custom_line(j) for j in jobs]
+    new = "\n".join([*kept, *lines])
+    if new and not new.endswith("\n"):
+        new += "\n"
+    res = _crontab(["-"], input=new)
+    if res.returncode != 0:
+        raise CronError(res.stderr.strip() or "crontab - failed")
+    return {"ok": True, "count": len(lines)}
+
+def list_custom() -> list[dict]:
+    """Baca line custom dari crontab: [{id, schedule, command}]."""
+    out = []
+    for ln in _current().splitlines():
+        if CUSTOM_MARKER not in ln:
+            continue
+        m = re.search(rf"{CUSTOM_MARKER}-(\d+)\s*$", ln)
+        if not m:
+            continue
+        body = ln[: m.start()].rstrip().rstrip("#").strip()
+        parts = body.split(None, 5)
+        if len(parts) < 6:
+            continue
+        out.append({"id": int(m.group(1)), "schedule": " ".join(parts[:5]), "command": " ".join(parts[5:])})
+    return out
+
+def remove_custom(job_id: int) -> None:
+    """Hapus line custom satu job dari crontab. Idempoten."""
+    marker = _job_marker(job_id)
+    current = _current()
+    if marker not in current:
+        return
+    kept = [ln for ln in current.splitlines() if marker not in ln]
+    res = _crontab(["-"], input="\n".join(kept) + "\n")
+    if res.returncode != 0:
+        raise CronError(res.stderr.strip() or "crontab - failed")
 
 def _crontab(args: list[str], input: str | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(["crontab", *args], input=input, capture_output=True, text=True)

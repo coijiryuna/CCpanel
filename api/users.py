@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from core import validate
 
-from .deps import _log, app, get_db, require_admin
+from .deps import _log, app, dt_order, dt_params, dt_response, get_db, require_admin
 
 class UserCreate(BaseModel):
     username: str
@@ -23,11 +23,34 @@ class UserResponse(BaseModel):
     role: str
     created_at: str
 
-@app.get("/api/users", response_model=list[UserResponse])
-def list_users(user: dict = Depends(require_admin)) -> list[UserResponse]:
+@app.get("/api/users", response_model=list[UserResponse] | dict)
+def list_users(
+    start: int = 0,
+    length: int = 0,
+    draw: int = 0,
+    search: str | None = None,
+    order_col: str | None = None,
+    order_dir: str = "asc",
+    user: dict = Depends(require_admin),
+) -> list[UserResponse] | dict:
+    start, length, draw = dt_params(start, length, draw)
+    conds: list[str] = []
+    args: list = []
+    if search:
+        s = f"%{search.strip()}%"
+        conds.append("(username LIKE ? OR role LIKE ?)")
+        args.extend([s, s])
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
     with get_db() as conn:
-        rows = conn.execute("SELECT id, username, role, created_at FROM users ORDER BY id").fetchall()
-    return [UserResponse(**dict(r)) for r in rows]
+        total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        filtered = conn.execute("SELECT COUNT(*) FROM users" + where, args).fetchone()[0]
+        rows = conn.execute(
+            "SELECT id, username, role, created_at FROM users" + where
+            + dt_order(["id", "username", "role", "created_at"], order_col, order_dir)
+            + (" LIMIT ? OFFSET ?" if length else ""),
+            args + ([length, start] if length else []),
+        ).fetchall()
+    return dt_response([UserResponse(**dict(r)) for r in rows], start, length, total, filtered, draw)
 
 @app.post("/api/users", response_model=UserResponse)
 def create_user(req: UserCreate, user: dict = Depends(require_admin)) -> UserResponse:

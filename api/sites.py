@@ -14,7 +14,7 @@ from core import validate
 from core import waf as waf_ops
 from core import webserver as webserver_ops
 
-from .deps import _log, app, check_site_access, get_db, require_auth
+from .deps import _log, app, check_site_access, dt_order, dt_params, dt_response, get_db, require_auth
 
 PROJECT_TYPES = ["static", "php"]
 
@@ -29,6 +29,7 @@ class SiteCreate(BaseModel):
     php_version: str = "static"
     create_ftp: bool = False
     ftp_username: str = ""
+    ftp_password: str = ""
     create_db: bool = False
     db_name: str = ""
     db_user: str = ""
@@ -171,10 +172,11 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
                 php_ops.insert_php_block(domain, php_version, Path(webserver_ops.vhost_path(domain)))
             if req.create_ftp:
                 username = (req.ftp_username or "").strip() or domain.split(".")[0]
-                ftp_created = ftp_ops.create_account(username, "", site_id)
+                password = (req.ftp_password or "").strip() or secrets.token_urlsafe(12)
+                ftp_created = ftp_ops.create_account(username, password, site_id)
                 conn.execute(
-                    "INSERT INTO ftp_accounts (site_id, username, password, created_at) VALUES (?, ?, ?, ?)",
-                    (site_id, username, ftp_created, datetime.now(timezone.utc).isoformat()),
+                    "INSERT INTO ftp_accounts (site_id, username, password, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (site_id, username, password, ftp_created, datetime.now(timezone.utc).isoformat()),
                 )
             if req.create_db:
                 db_name = (req.db_name or "").strip().lower() or domain.replace(".", "_")
@@ -235,17 +237,43 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
 def php_versions(user: dict = Depends(require_auth)) -> dict:
     return {"versions": ["static"] + php_ops.PHP_VERSIONS}
 
-@app.get("/api/sites", response_model=list[SiteResponse])
-def list_sites(user: dict = Depends(require_auth)) -> list[SiteResponse]:
+@app.get("/api/sites", response_model=list[SiteResponse] | dict)
+def list_sites(
+    start: int = 0,
+    length: int = 0,
+    draw: int = 0,
+    search: str | None = None,
+    order_col: str | None = None,
+    order_dir: str = "asc",
+    user: dict = Depends(require_auth),
+) -> list[SiteResponse] | dict:
     from .deps import app_state
 
+    start, length, draw = dt_params(start, length, draw)
+    sql = "SELECT * FROM sites"
+    conds: list[str] = []
+    search_conds: list[str] = []
+    args: list = []
+    if user["role"] != "admin":
+        conds.append("owner_id = ?")
+        args.append(user["id"])
+    if search:
+        s = f"%{search.strip()}%"
+        search_conds.append("(domain LIKE ? OR description LIKE ? OR category LIKE ?)")
+        args.extend([s, s, s])
+    all_conds = conds + search_conds
+    where = (" WHERE " + " AND ".join(all_conds)) if all_conds else ""
     with get_db() as conn:
-        if user["role"] == "admin":
-            rows = conn.execute("SELECT * FROM sites ORDER BY id").fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM sites WHERE owner_id = ? ORDER BY id", (user["id"],)
-            ).fetchall()
+        total = conn.execute(
+            "SELECT COUNT(*) FROM sites" + (f" WHERE {' AND '.join(conds)}" if conds else ""),
+            args[:len(conds)],
+        ).fetchone()[0]
+        filtered = conn.execute("SELECT COUNT(*) FROM sites" + where, args).fetchone()[0]
+        rows = conn.execute(
+            sql + where + dt_order(["id", "domain", "enabled", "created_at"], order_col, order_dir)
+            + (" LIMIT ? OFFSET ?" if length else ""),
+            args + ([length, start] if length else []),
+        ).fetchall()
         out = []
         for r in rows:
             sr = _site_row(r, conn)
@@ -257,7 +285,7 @@ def list_sites(user: dict = Depends(require_auth)) -> list[SiteResponse]:
                     "state": app_state(r["domain"], r["root_path"], app["app_type"]),
                 }
             out.append(sr)
-    return out
+    return dt_response(out, start, length, total, filtered, draw)
 
 @app.post("/api/sites/{site_id}/enable")
 def enable_site(site_id: int, user: dict = Depends(require_auth)) -> dict:

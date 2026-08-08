@@ -17,7 +17,7 @@ from core import apps as apps_ops
 from core import nginx as nginx_ops
 from core import validate
 
-from .deps import _log, app, get_db, require_auth
+from .deps import _log, app, dt_order, dt_params, dt_response, get_db, require_auth
 
 PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
@@ -30,6 +30,7 @@ class ProjectCreate(BaseModel):
     run_opt: str | None = None
     user: str | None = None
     node_version: str | None = None
+    go_version: str | None = None
     pm2: bool = False
     remark: str | None = None
     domain: str | None = None
@@ -43,6 +44,7 @@ class ProjectUpdate(BaseModel):
     run_opt: str | None = None
     user: str | None = None
     node_version: str | None = None
+    go_version: str | None = None
     pm2: bool | None = None
     remark: str | None = None
     root_path: str | None = None  # optional: pindah ke folder existing
@@ -70,25 +72,52 @@ def _check_project(conn, project_id: int, user: dict):
     return row
 
 
-def _validate_fields(app_type: str, port: int, node_version: str | None = None) -> None:
+def _validate_fields(app_type: str, port: int, node_version: str | None = None, go_version: str | None = None) -> None:
     if app_type not in apps_ops.APP_TYPES:
         raise HTTPException(400, f"Tipe aplikasi tidak valid. Pilihan: {', '.join(apps_ops.APP_TYPES)}")
     if not 1 <= port <= 65535:
         raise HTTPException(400, "Port tidak valid (1-65535)")
     if node_version and node_version not in apps_ops.NODE_VERSIONS:
         raise HTTPException(400, f"Versi node tidak valid. Pilihan: {', '.join(apps_ops.NODE_VERSIONS)}")
+    if go_version and go_version not in apps_ops.GO_VERSIONS:
+        raise HTTPException(400, f"Versi Go tidak valid. Pilihan: {', '.join(apps_ops.GO_VERSIONS)}")
 
 
-@app.get("/api/projects", response_model=list[dict])
-def list_projects(user: dict = Depends(require_auth)) -> list[dict]:
+@app.get("/api/projects", response_model=list[dict] | dict)
+def list_projects(
+    start: int = 0,
+    length: int = 0,
+    draw: int = 0,
+    search: str | None = None,
+    order_col: str | None = None,
+    order_dir: str = "asc",
+    user: dict = Depends(require_auth),
+) -> list[dict] | dict:
+    start, length, draw = dt_params(start, length, draw)
+    conds: list[str] = []
+    args: list = []
+    if user["role"] != "admin":
+        conds.append("owner_id = ?")
+        args.append(user["id"])
+    if search:
+        s = f"%{search.strip()}%"
+        conds.append("(name LIKE ? OR app_type LIKE ? OR remark LIKE ?)")
+        args.extend([s, s, s])
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
     with get_db() as conn:
-        if user["role"] == "admin":
-            rows = conn.execute("SELECT * FROM projects ORDER BY id").fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM projects WHERE owner_id = ? ORDER BY id", (user["id"],)
-            ).fetchall()
-        return [_project_row(conn, r) for r in rows]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM projects"
+            + (f" WHERE owner_id = ?" if user["role"] != "admin" else ""),
+            ([user["id"]] if user["role"] != "admin" else []),
+        ).fetchone()[0]
+        filtered = conn.execute("SELECT COUNT(*) FROM projects" + where, args).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM projects" + where
+            + dt_order(["id", "name", "app_type", "port", "created_at"], order_col, order_dir)
+            + (" LIMIT ? OFFSET ?" if length else ""),
+            args + ([length, start] if length else []),
+        ).fetchall()
+    return dt_response([_project_row(conn, r) for r in rows], start, length, total, filtered, draw)
 
 
 @app.post("/api/projects", response_model=dict)
@@ -96,11 +125,12 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
     name = (req.name or "").strip()
     if not PROJECT_NAME_RE.fullmatch(name):
         raise HTTPException(400, "Nama project hanya huruf/angka/-/_ (max 64)")
-    _validate_fields(req.app_type, req.port, req.node_version)
+    _validate_fields(req.app_type, req.port, req.node_version, req.go_version)
     entry = (req.entry or apps_ops.DEFAULT_ENTRY[req.app_type]).strip()
     run_user = (req.user or apps_ops.DEFAULT_USER).strip() or apps_ops.DEFAULT_USER
     run_opt = (req.run_opt or "").strip()
     node_version = (req.node_version or "").strip()
+    go_version = (req.go_version or "").strip()
     remark = (req.remark or "").strip()
     domain = (req.domain or "").strip().lower()
     if domain and not validate.valid_domain(domain):
@@ -113,6 +143,8 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
             raise HTTPException(400, f"Folder root_path tidak ada: {root}")
     else:
         root = apps_ops.project_root(name)
+    # auto-detect entry dari package.json / app.py kalau kosong
+    entry = apps_ops.resolve_entry(req.app_type, root, entry)
 
     with get_db() as conn:
         if conn.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
@@ -128,7 +160,7 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
                 raise HTTPException(409, f"Domain {domain} sudah jadi alias site")
         try:
             if req.root_path:
-                # user-provided folder: just create systemd unit, don't create folder
+                # user-provided folder: siapkan deps, lalu tulis unit systemd
                 if req.app_type not in apps_ops.APP_TYPES:
                     raise HTTPException(400, f"app_type tidak valid. Pilihan: {', '.join(apps_ops.APP_TYPES)}")
                 if not 1 <= req.port <= 65535:
@@ -136,30 +168,26 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
                 if req.app_type == "docker":
                     if not (root / "docker-compose.yml").exists():
                         raise HTTPException(400, f"docker-compose.yml tidak ada di {root}")
-                if req.app_type == "go":
-                    bin_path = root / entry
-                    if not bin_path.exists():
-                        raise HTTPException(400, f"Binary {entry} tidak ada di {root}")
-                    bin_path.chmod(0o755)
+                apps_ops._prepare_project(req.app_type, root, run_user, node_version)
                 apps_ops._do_create(
                     apps_ops._standalone_unit_path(name), name, root, req.app_type, req.port, entry,
-                    run_user, run_opt, req.pm2, name, node_version,
+                    run_user, run_opt, req.pm2, name, node_version, go_version,
                 )
                 final_root = root
             else:
                 final_root = apps_ops.create_standalone(
                     name, req.app_type, req.port, entry,
-                    user=run_user, run_opt=run_opt, pm2=req.pm2, node_version=node_version,
+                    user=run_user, run_opt=run_opt, pm2=req.pm2, node_version=node_version, go_version=go_version,
                 )
             if domain:
                 nginx_ops.project_proxy_enable(domain, req.port)
         except (apps_ops.AppError, nginx_ops.NginxError) as e:
             raise HTTPException(500, str(e)) from e
         cur = conn.execute(
-            "INSERT INTO projects (name, app_type, port, entry, root_path, run_opt, user, node_version, pm2, remark, domain, owner_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO projects (name, app_type, port, entry, root_path, run_opt, user, node_version, go_version, pm2, remark, domain, owner_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (name, req.app_type, req.port, entry, str(final_root), run_opt, run_user,
-             node_version, 1 if req.pm2 else 0, remark, domain,
+             node_version, go_version, 1 if req.pm2 else 0, remark, domain,
              None if user["role"] == "admin" else user["id"],
              datetime.now(timezone.utc).isoformat()),
         )
@@ -179,9 +207,10 @@ def update_project(project_id: int, req: ProjectUpdate, user: dict = Depends(req
         run_opt = (req.run_opt if req.run_opt is not None else row["run_opt"] or "").strip()
         run_user = (req.user if req.user is not None else row["user"] or apps_ops.DEFAULT_USER).strip()
         node_version = (req.node_version if req.node_version is not None else row["node_version"] or "").strip()
+        go_version = (req.go_version if req.go_version is not None else row["go_version"] or "").strip()
         pm2 = req.pm2 if req.pm2 is not None else bool(row["pm2"])
         remark = (req.remark if req.remark is not None else row["remark"] or "").strip()
-        _validate_fields(app_type, port, node_version)
+        _validate_fields(app_type, port, node_version, go_version)
         
         # handle root_path change
         old_root = Path(row["root_path"]) if row["root_path"] else apps_ops.project_root(row["name"])
@@ -193,11 +222,13 @@ def update_project(project_id: int, req: ProjectUpdate, user: dict = Depends(req
                     raise HTTPException(400, f"Folder root_path tidak ada: {new_root}")
             else:
                 new_root = apps_ops.project_root(row["name"])
+        # auto-detect entry kalau user kosongkan
+        entry = apps_ops.resolve_entry(app_type, new_root, entry)
         
         try:
             apps_ops.remove_standalone(row["name"], row["app_type"])
             if req.root_path is not None and req.root_path:
-                # user-provided folder: just create systemd unit
+                # user-provided folder: siapkan deps, lalu tulis unit systemd
                 if app_type not in apps_ops.APP_TYPES:
                     raise HTTPException(400, f"app_type tidak valid. Pilihan: {', '.join(apps_ops.APP_TYPES)}")
                 if not 1 <= port <= 65535:
@@ -205,19 +236,15 @@ def update_project(project_id: int, req: ProjectUpdate, user: dict = Depends(req
                 if app_type == "docker":
                     if not (new_root / "docker-compose.yml").exists():
                         raise HTTPException(400, f"docker-compose.yml tidak ada di {new_root}")
-                if app_type == "go":
-                    bin_path = new_root / entry
-                    if not bin_path.exists():
-                        raise HTTPException(400, f"Binary {entry} tidak ada di {new_root}")
-                    bin_path.chmod(0o755)
+                apps_ops._prepare_project(app_type, new_root, run_user, node_version)
                 apps_ops._do_create(
                     apps_ops._standalone_unit_path(row["name"]), row["name"], new_root, app_type, port, entry,
-                    run_user, run_opt, pm2, row["name"], node_version,
+                    run_user, run_opt, pm2, row["name"], node_version, go_version,
                 )
             else:
                 new_root = apps_ops.create_standalone(
                     row["name"], app_type, port, entry,
-                    user=run_user, run_opt=run_opt, pm2=pm2, node_version=node_version,
+                    user=run_user, run_opt=run_opt, pm2=pm2, node_version=node_version, go_version=go_version,
                 )
             # domain proxy: kalau aktif dan port berubah, tulis ulang vhost
             if row["domain"] and row["port"] != port:
@@ -226,8 +253,8 @@ def update_project(project_id: int, req: ProjectUpdate, user: dict = Depends(req
         except (apps_ops.AppError, nginx_ops.NginxError) as e:
             raise HTTPException(500, str(e)) from e
         conn.execute(
-            "UPDATE projects SET app_type=?, port=?, entry=?, run_opt=?, user=?, node_version=?, pm2=?, remark=?, root_path=? WHERE id=?",
-            (app_type, port, entry, run_opt, run_user, node_version, 1 if pm2 else 0,
+            "UPDATE projects SET app_type=?, port=?, entry=?, run_opt=?, user=?, node_version=?, go_version=?, pm2=?, remark=?, root_path=? WHERE id=?",
+            (app_type, port, entry, run_opt, run_user, node_version, go_version, 1 if pm2 else 0,
              remark, str(new_root), project_id),
         )
         _log(conn, user, "project.update", f"{row['name']}: {app_type} port {port}")

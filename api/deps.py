@@ -5,6 +5,7 @@ deps -> core, api/* -> deps, server.py -> deps + api/*.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import secrets
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import bcrypt
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core import apps as apps_ops
@@ -41,6 +42,47 @@ def get_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+# ------------------------------------------------------- DataTables helper
+def dt_response(
+    rows: list,
+    start: int = 0,
+    length: int = 0,
+    total: int | None = None,
+    filtered: int | None = None,
+    draw: int = 0,
+) -> list | dict:
+    """Bungkus baris jadi format DataTables server-side.
+
+    rows HARUS sudah halaman yang benar (SQL LIMIT/OFFSET atau slice manual di
+    caller). Kalau length > 0 → envelope {draw, recordsTotal, recordsFiltered,
+    data}; kalau tidak → array polos (backward compatible).
+    """
+    if length > 0:
+        return {
+            "draw": draw,
+            "recordsTotal": total if total is not None else len(rows),
+            "recordsFiltered": filtered if filtered is not None else len(rows),
+            "data": rows,
+        }
+    return rows
+
+def dt_params(start: int = 0, length: int = 0, draw: int = 0) -> tuple[int, int, int]:
+    """Batas aman: start >= 0, length 0..500. Echo draw balik (anti XSS/injection)."""
+    return max(0, start), max(0, min(length, 500)), max(0, draw)
+
+def dt_order(columns: list[str], order_col: str | None = None, order_dir: str = "asc") -> str:
+    """Klausa ORDER BY aman: kolom cuma dari whitelist, arah cuma asc/desc.
+
+    order_col bisa '0' (index kolom DataTables) atau nama kolom. Default 'id'.
+    """
+    col = (order_col or "").strip().lower()
+    if col.isdigit():
+        idx = int(col)
+        col = columns[idx] if 0 <= idx < len(columns) else "id"
+    if col not in columns:
+        col = "id"
+    return f" ORDER BY {col} {'DESC' if (order_dir or '').strip().lower() == 'desc' else 'ASC'}"
 
 def init_db() -> None:
     _data_dir().mkdir(parents=True, exist_ok=True)
@@ -81,7 +123,8 @@ def init_db() -> None:
                 ts         TEXT NOT NULL,
                 user       TEXT NOT NULL,
                 action     TEXT NOT NULL,
-                detail     TEXT NOT NULL DEFAULT ''
+                detail     TEXT NOT NULL DEFAULT '',
+                ip         TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS ftp_accounts (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,6 +171,14 @@ def init_db() -> None:
                 pm2        INTEGER NOT NULL DEFAULT 0,
                 remark     TEXT NOT NULL DEFAULT '',
                 domain     TEXT NOT NULL DEFAULT '',
+                owner_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS cron_jobs (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                schedule   TEXT NOT NULL,
+                command    TEXT NOT NULL,
                 owner_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 created_at TEXT NOT NULL
             );
@@ -180,17 +231,28 @@ def init_db() -> None:
             conn.execute("ALTER TABLE projects ADD COLUMN domain TEXT NOT NULL DEFAULT ''")
         if "owner_id" not in pcols:
             conn.execute("ALTER TABLE projects ADD COLUMN owner_id INTEGER REFERENCES users(id)")
+        jcols = [r[1] for r in conn.execute("PRAGMA table_info(cron_jobs)").fetchall()]
+        if "kind" not in jcols:
+            conn.execute("ALTER TABLE cron_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'command'")
+        lcols = [r[1] for r in conn.execute("PRAGMA table_info(audit_log)").fetchall()]
+        if "ip" not in lcols:
+            conn.execute("ALTER TABLE audit_log ADD COLUMN ip TEXT NOT NULL DEFAULT ''")
         seed_admin(conn)
 
 def _log(conn: sqlite3.Connection | None, user: dict | str, action: str, detail: str = "") -> None:
     """Catat aksi ke audit_log. user boleh dict (dari require_auth) atau str polos."""
-    username = user["username"] if isinstance(user, dict) else user
-    row = (datetime.now(timezone.utc).isoformat(), username, action, detail)
+    if isinstance(user, dict):
+        username = user["username"]
+        ip = user.get("ip", "")
+    else:
+        username = user
+        ip = ""
+    row = (datetime.now(timezone.utc).isoformat(), username, action, detail, ip)
     if conn is not None:
-        conn.execute("INSERT INTO audit_log (ts, user, action, detail) VALUES (?, ?, ?, ?)", row)
+        conn.execute("INSERT INTO audit_log (ts, user, action, detail, ip) VALUES (?, ?, ?, ?, ?)", row)
     else:
         with get_db() as conn2:
-            conn2.execute("INSERT INTO audit_log (ts, user, action, detail) VALUES (?, ?, ?, ?)", row)
+            conn2.execute("INSERT INTO audit_log (ts, user, action, detail, ip) VALUES (?, ?, ?, ?, ?)", row)
 
 def seed_admin(conn: sqlite3.Connection) -> None:
     if conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
@@ -220,7 +282,39 @@ def _get_user(username: str) -> sqlite3.Row | None:
     with get_db() as conn:
         return conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
 
-def require_auth(cred: HTTPAuthorizationCredentials | None = Depends(bearer)) -> dict:
+def _is_valid_ip(addr: str) -> bool:
+    """Cek string adalah IP v4/v6 valid. Tolak spoof garbage seperti 'unknown'."""
+    try:
+        ipaddress.ip_address(addr.strip())
+        return True
+    except ValueError:
+        return False
+
+
+def _client_ip(request: Request) -> str:
+    """IP asli client, prioritas: X-Real-IP → X-Forwarded-For (IP pertama valid) → socket.
+
+    Catatan keamanan: header bisa dipalsukan kalau client akses langsung tanpa
+    proxy. Di belakang nginx, pastikan nginx TIMPA header ini:
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    """
+    real = request.headers.get("x-real-ip")
+    if real and _is_valid_ip(real):
+        return real.strip()
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        for part in xff.split(","):
+            part = part.strip()
+            if part and _is_valid_ip(part):
+                return part
+    return request.client.host if request.client else ""
+
+
+def require_auth(
+    request: Request,
+    cred: HTTPAuthorizationCredentials | None = Depends(bearer),
+) -> dict:
     """Return row user (dict) dari token. Raise 401 kalau token invalid/user hilang."""
     if cred is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing token")
@@ -231,7 +325,9 @@ def require_auth(cred: HTTPAuthorizationCredentials | None = Depends(bearer)) ->
     row = _get_user(payload["sub"])
     if row is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User tidak ada")
-    return dict(row)
+    user = dict(row)
+    user["ip"] = _client_ip(request)
+    return user
 
 def require_admin(user: dict = Depends(require_auth)) -> dict:
     if user["role"] != "admin":
