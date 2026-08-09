@@ -221,4 +221,6 @@ CCpanel/
 
 ## Roadmap (future, YAGNI sekarang)
 
-Start/Stop/Restart service ccpanel, multi-server cluster/HA/CDN, billing/domain registrar API/marketplace plugin. (Apache/OpenLiteSpeed, PostgreSQL/MongoDB/Redis, PHP multi-version, terminal, logging, FTP, WAF, multi-user, backup/restore, monitoring/dashboard, CLI & Docker — sudah selesai).
+- Start/Stop/Restart service ccpanel, 
+- Multi-server cluster/HA/CDN, 
+- Billing/domain registrar API/marketplace plugin.
