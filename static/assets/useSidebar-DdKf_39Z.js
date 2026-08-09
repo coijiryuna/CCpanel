@@ -1,1 +1,0 @@
-import{b as n}from"./index-CgP0-54e.js";const t=n(null);let e;function r(u,o=!0){t.value={msg:u,ok:o},clearTimeout(e),e=setTimeout(()=>t.value=null,3500)}function a(){return{toast:t,notify:r}}export{a as u};
