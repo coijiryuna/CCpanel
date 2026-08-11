@@ -39,6 +39,14 @@ APPSTORE_TTL = int(os.environ.get("CCPANEL_APPSTORE_TTL", "3600"))
 SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
 SERVICE_ACTIONS = {"start", "stop", "restart", "reload"}
 
+# Direktori binary non-PATH umum (nginx, apache2, php-fpm sering di sini).
+# Bisa di-override env utk testing.
+SBIN_DIRS = [
+    Path(d) for d in os.environ.get(
+        "CCPANEL_SBIN_DIRS", "/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin"
+    ).split(":") if d
+]
+
 # ------------------------------------------------------------------ task async
 # Task install/uninstall jalan di background thread (core/tasks). Frontend
 # polling status + output per baris. Status: running / done / error.
@@ -114,15 +122,15 @@ CATALOG: list[dict] = [
      "detect": {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v24")}},
     # ---- Go SDK ----
     {"id": "go1.22", "name": "Go 1.22", "category": "go", "desc": "Go SDK 1.22",
-     "install": ["bash", "-lc", f"curl -sSL https://go.dev/dl/go1.22.linux-amd64.tar.gz | tar -C {GO_ROOT} -xzf - && mv {GO_ROOT}/go {GO_ROOT}/go1.22"],
+     "install": ["bash", "-lc", f"mkdir -p {GO_ROOT} && curl -sSL https://go.dev/dl/go1.22.linux-amd64.tar.gz | tar -C {GO_ROOT} -xzf - && mv {GO_ROOT}/go {GO_ROOT}/go1.22"],
      "uninstall": ["rm", "-rf", str(GO_ROOT / "go1.22")],
      "detect": {"type": "dir", "path": str(GO_ROOT / "go1.22")}},
     {"id": "go1.23", "name": "Go 1.23", "category": "go", "desc": "Go SDK 1.23",
-     "install": ["bash", "-lc", f"wget -qO- https://go.dev/dl/go1.23.linux-amd64.tar.gz | tar -C {GO_ROOT} -xzf && mv {GO_ROOT}/go {GO_ROOT}/go1.23"],
+     "install": ["bash", "-lc", f"mkdir -p {GO_ROOT} && wget -qO- https://go.dev/dl/go1.23.linux-amd64.tar.gz | tar -C {GO_ROOT} -xzf && mv {GO_ROOT}/go {GO_ROOT}/go1.23"],
      "uninstall": ["rm", "-rf", str(GO_ROOT / "go1.23")],
      "detect": {"type": "dir", "path": str(GO_ROOT / "go1.23")}},
     {"id": "go1.24", "name": "Go 1.24", "category": "go", "desc": "Go SDK 1.24",
-     "install": ["bash", "-lc", f"wget -qO- https://go.dev/dl/go1.24.linux-amd64.tar.gz | tar -C {GO_ROOT} -xz && mv {GO_ROOT}/go {GO_ROOT}/go1.24"],
+     "install": ["bash", "-lc", f"mkdir -p {GO_ROOT} && wget -qO- https://go.dev/dl/go1.24.linux-amd64.tar.gz | tar -C {GO_ROOT} -xz && mv {GO_ROOT}/go {GO_ROOT}/go1.24"],
      "uninstall": ["rm", "-rf", str(GO_ROOT / "go1.24")],
      "detect": {"type": "dir", "path": str(GO_ROOT / "go1.24")}},
     # ---- Aplikasi pendukung ----
@@ -177,7 +185,19 @@ def _run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
 
 
 def _which(bin_name: str) -> bool:
-    return shutil.which(bin_name) is not None
+    """Cek binary ada: PATH + direktori sbin umum.
+
+    shutil.which hanya cek PATH. Banyak binary server (nginx, apache2,
+    php-fpm8.x) berada di /usr/sbin yang tidak selalu di PATH saat panel
+    jalan (via systemd/dev shell). Tanpa fallback ini, aplikasi yang sudah
+    terinstall tampil sebagai belum terinstall di App Store.
+    """
+    if shutil.which(bin_name):
+        return True
+    for d in SBIN_DIRS:
+        if (d / bin_name).is_file():
+            return True
+    return False
 
 
 def _detect(spec) -> bool:

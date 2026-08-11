@@ -21,6 +21,20 @@ def test_catalog_ids_unique():
 def test_detect_which_false_when_missing():
     assert store._detect({"type": "which", "bin": ["php9.9"]}) is False
 
+def test_detect_which_finds_sbin_binaries():
+    """Binary di /usr/sbin (di luar PATH) harus terdeteksi."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        fake_bin = Path(td) / "fake-server-bin"
+        fake_bin.write_text("#!/bin/sh\nexit 0\n")
+        fake_bin.chmod(0o755)
+        old = store.SBIN_DIRS
+        store.SBIN_DIRS = [Path(td)]
+        try:
+            assert store._detect({"type": "which", "bin": ["fake-server-bin"]}) is True
+        finally:
+            store.SBIN_DIRS = old
+
 def test_detect_dir_false_when_missing():
     assert store._detect({"type": "dir", "path": "/nonexistent/xyz"}) is False
 
