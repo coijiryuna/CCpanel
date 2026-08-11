@@ -85,6 +85,7 @@ apt install -y nginx mariadb-server $PHP_PKGS python3-venv python3-pip certbot p
 APP_DIR="${APP_DIR:-/opt/ccpanel}"
 echo "==> Salin project ke $APP_DIR"
 mkdir -p "$APP_DIR"
+# static/ prebuilt sudah cukup — dashboard/ (source Vue) tidak diperlukan
 cp -r server.py api core requirements.txt static "$APP_DIR/"
 
 cd "$APP_DIR"
