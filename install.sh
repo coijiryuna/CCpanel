@@ -97,8 +97,8 @@ python3 -m venv .venv
 ##cd dashboard && npm install && npm run build && cd ..
 ## Tidak perlu karena sudah build static
 
-echo "==> Folder website + trash"
-mkdir -p /www/wwwroot /www/trash
+echo "==> Folder website + trash + project"
+mkdir -p /www/wwwroot /www/trash /www/project
 
 echo "==> Systemd service + env"
 # Secret otomatis kalau belum diset (mis. install ulang)
