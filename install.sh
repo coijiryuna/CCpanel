@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # Install CCPanel di Ubuntu 20.04/22.04/24.04 / Debian 11/12/13 / Linux Mint.
 # Jalankan sebagai root: sudo bash install.sh
+# Bisa juga langsung via curl (auto-clone kalau source tak ada):
+#   curl -fsSL https://raw.githubusercontent.com/coijiryuna/CCpanel/main/install.sh | sudo bash
 set -euo pipefail
+
+# --- Self-bootstrap: kalau dijalankan via curl, source tak ada → clone dulu ---
+if [ ! -f "$(dirname "$0")/server.py" ]; then
+  echo "==> Source CCPanel tidak ditemukan — clone dari GitHub"
+  apt install -y git
+  _TMP="$(mktemp -d)"
+  git clone --depth 1 https://github.com/coijiryuna/CCpanel.git "$_TMP/ccpanel"
+  cd "$_TMP/ccpanel"
+fi
 
 . /etc/os-release   # set ID, VERSION_CODENAME
 

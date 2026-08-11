@@ -28,6 +28,43 @@ apt update && apt install -y nginx mariadb-server php8.1-fpm php8.2-fpm php8.3-f
 
 ## Install
 
+### Cara cepat — via curl (disarankan)
+
+```bash
+# VPS Ubuntu 22.04/24.04 / Debian 12/13 (root)
+curl -fsSL https://raw.githubusercontent.com/coijiryuna/CCpanel/main/install.sh | sudo bash
+```
+
+Skrip otomatis:
+1. Deteksi OS + pasang repo PHP yang benar (ondrej/sury/resmi)
+2. Install paket: `nginx mariadb-server php8.x-fpm python3-venv nodejs npm certbot`
+3. Clone source (kalau belum ada), buat venv, install requirements
+4. Build frontend, buat folder `/www/wwwroot` + `/www/trash`
+5. Generate password admin + JWT secret otomatis → simpan di `/etc/ccpanel.env` (mode 600)
+6. Pasang systemd service `ccpanel`, auto-start
+
+Selesai → tampil di terminal:
+```
+Login: admin / <password-acak>
+Credential tersimpan di /etc/ccpanel.env
+```
+
+Akses via SSH tunnel:
+```bash
+ssh -L 8888:127.0.0.1:8888 user@vps-ip
+# buka http://127.0.0.1:8888
+```
+
+### Manual — clone + jalankan install.sh
+
+```bash
+git clone https://github.com/coijiryuna/CCpanel.git
+cd CCpanel
+sudo bash install.sh
+```
+
+### Manual penuh (tanpa install.sh)
+
 ```bash
 # 1. Clone / salin project ke /opt/ccpanel
 cd /opt/ccpanel
