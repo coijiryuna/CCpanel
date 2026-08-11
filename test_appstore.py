@@ -176,3 +176,43 @@ def test_start_task_unknown_raises():
         assert False, "harus raise"
     except store.AppStoreError:
         pass
+
+def test_service_action_stops_other_webserver_on_start(monkeypatch):
+    """Start apache2 harus stop nginx dulu (satu port 80)."""
+    calls: list[list[str]] = []
+    def fake_run(cmd, timeout=300):
+        calls.append(cmd)
+        class R:
+            # is-active nginx → 0 (aktif); is-active lain → 1; start apache2 → 0
+            returncode = 0 if (cmd[-1] == "nginx" or cmd[1] == "start") else 1
+            stdout = ""
+            stderr = ""
+        return R()
+    monkeypatch.setattr(store, "_run", fake_run)
+    # nginx aktif, apache terinstall
+    monkeypatch.setattr(store, "_detect", lambda spec: True)
+    res = store.service_action("apache", "start")
+    assert res["ok"] is True
+    sc = store.SYSTEMCTL
+    # urutan: is-active nginx → stop nginx → start apache2
+    starts = [c for c in calls if c[0] == sc and c[1] == "start"]
+    stops = [c for c in calls if c[0] == sc and c[1] == "stop"]
+    assert starts == [[sc, "start", "apache2"]]
+    assert stops == [[sc, "stop", "nginx"]]
+
+def test_service_action_start_nginx_stops_apache(monkeypatch):
+    calls: list[list[str]] = []
+    def fake_run(cmd, timeout=300):
+        calls.append(cmd)
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return R()
+    monkeypatch.setattr(store, "_run", fake_run)
+    monkeypatch.setattr(store, "_detect", lambda spec: True)
+    res = store.service_action("nginx", "start")
+    assert res["ok"] is True
+    sc = store.SYSTEMCTL
+    stops = [c for c in calls if c[0] == sc and c[1] == "stop"]
+    assert stops == [[sc, "stop", "apache2"], [sc, "stop", "lsws"]]

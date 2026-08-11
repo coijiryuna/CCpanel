@@ -347,6 +347,14 @@ def service_action(item_id: str, action: str) -> dict:
         raise AppStoreError(f"{item['name']} tidak punya service systemd")
     if not _detect(item["detect"]):
         raise AppStoreError(f"{item['name']} tidak terinstall")
+    # Web server: satu port 80 hanya satu engine. Start nginx/apache/lsws
+    # harus stop engine lain dulu, kalau tidak bind port gagal.
+    if action == "start" and unit in ("nginx", "apache2", "lsws"):
+        for other in ("nginx", "apache2", "lsws"):
+            if other == unit:
+                continue
+            if _run([SYSTEMCTL, "is-active", "--quiet", other]).returncode == 0:
+                _run([SYSTEMCTL, "stop", other])
     res = _run([SYSTEMCTL, action, unit])
     if res.returncode != 0:
         raise AppStoreError(res.stderr.strip() or res.stdout.strip() or f"systemctl {action} {unit} gagal")
