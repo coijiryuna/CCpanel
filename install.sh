@@ -80,12 +80,12 @@ esac
 setup_php_repos
 
 echo "==> Install paket sistem ($PHP_PKGS)"
-apt install -y nginx mariadb-server $PHP_PKGS python3-venv python3-pip nodejs npm certbot python3-certbot-nginx
+apt install -y nginx mariadb-server $PHP_PKGS python3-venv python3-pip certbot python3-certbot-nginx
 
 APP_DIR="${APP_DIR:-/opt/ccpanel}"
 echo "==> Salin project ke $APP_DIR"
 mkdir -p "$APP_DIR"
-cp -r server.py api core requirements.txt dashboard static "$APP_DIR/"
+cp -r server.py api core requirements.txt static "$APP_DIR/"
 
 cd "$APP_DIR"
 echo "==> Backend venv"
