@@ -386,26 +386,7 @@ def install_extension(php_version: str, ext_name: str) -> None:
     if php_version not in PHP_VERSIONS:
         raise PhpError(f"PHP version tidak valid: {php_version}")
     
-    # map extension name to package name
-    pkg_map = {
-        "gd": f"{php_version}-gd",
-        "curl": f"{php_version}-curl",
-        "mbstring": f"{php_version}-mbstring",
-        "xml": f"{php_version}-xml",
-        "zip": f"{php_version}-zip",
-        "mysql": f"{php_version}-mysql",
-        "pgsql": f"{php_version}-pgsql",
-        "redis": f"{php_version}-redis",
-        "imagick": f"{php_version}-imagick",
-        "intl": f"{php_version}-intl",
-        "bcmath": f"{php_version}-bcmath",
-        "soap": f"{php_version}-soap",
-        "xdebug": f"{php_version}-xdebug",
-        "igbinary": f"{php_version}-igbinary",
-        "msgpack": f"{php_version}-msgpack",
-    }
-    
-    pkg = pkg_map.get(ext_name.lower(), f"{php_version}-{ext_name}")
+    pkg = _ext_pkg(php_version, ext_name)
     res = _run_sudo(["apt-get", "update", "-qq"])
     res = _run_sudo(["apt-get", "install", "-y", pkg])
     if res.returncode != 0:
@@ -420,24 +401,7 @@ def install_extension_task(php_version: str, ext_name: str, key: str) -> None:
     if php_version not in PHP_VERSIONS:
         tasks_ops.finish(key, False, f"PHP version tidak valid: {php_version}")
         return
-    pkg_map = {
-        "gd": f"{php_version}-gd",
-        "curl": f"{php_version}-curl",
-        "mbstring": f"{php_version}-mbstring",
-        "xml": f"{php_version}-xml",
-        "zip": f"{php_version}-zip",
-        "mysql": f"{php_version}-mysql",
-        "pgsql": f"{php_version}-pgsql",
-        "redis": f"{php_version}-redis",
-        "imagick": f"{php_version}-imagick",
-        "intl": f"{php_version}-intl",
-        "bcmath": f"{php_version}-bcmath",
-        "soap": f"{php_version}-soap",
-        "xdebug": f"{php_version}-xdebug",
-        "igbinary": f"{php_version}-igbinary",
-        "msgpack": f"{php_version}-msgpack",
-    }
-    pkg = pkg_map.get(ext_name.lower(), f"{php_version}-{ext_name}")
+    pkg = _ext_pkg(php_version, ext_name)
     tasks_ops.run_stream(_sudo_cmd(["apt-get", "update", "-qq"]), key)
     if tasks_ops.status(key)["status"] != "done":
         return
@@ -450,6 +414,61 @@ def install_extension_task(php_version: str, ext_name: str, key: str) -> None:
         tasks_ops.append(key, f"Extension {ext_name} diaktifkan")
     except PhpError as e:
         tasks_ops.finish(key, False, str(e))
+
+# Nama extension (biasa dipakai php.ini / list_extensions) -> paket Debian.
+# Ekstensi core (dom, json, pdo, ...) sudah dibundel PHP, tak perlu diinstall.
+_EXT_PKG: dict[str, str] = {
+    "apcu": "apcu",  # paket global: php-apcu
+    "bcmath": "bcmath",
+    "bz2": "bz2",
+    "curl": "curl",
+    "dba": "dba",
+    "enchant": "enchant",
+    "exif": "exif",
+    "ffi": "ffi",
+    "gd": "gd",
+    "gettext": "gettext",
+    "gmp": "gmp",
+    "igbinary": "igbinary",
+    "imagick": "imagick",
+    "imap": "imap",
+    "intl": "intl",
+    "ldap": "ldap",
+    "mbstring": "mbstring",
+    "memcached": "memcached",
+    "mongodb": "mongodb",
+    "msgpack": "msgpack",
+    "mysql": "mysql",
+    "mysqli": "mysql",
+    "oauth": "oauth",
+    "odbc": "odbc",
+    "opcache": "opcache",
+    "pcntl": "pcntl",
+    "pgsql": "pgsql",
+    "pspell": "pspell",
+    "readline": "readline",
+    "redis": "redis",
+    "snmp": "snmp",
+    "soap": "soap",
+    "sockets": "sockets",
+    "sqlite3": "sqlite3",
+    "ssh2": "ssh2",
+    "tidy": "tidy",
+    "uuid": "uuid",
+    "xdebug": "xdebug",
+    "xmlrpc": "xmlrpc",
+    "xsl": "xsl",
+    "yaml": "yaml",
+    "zip": "zip",
+    "zstd": "zstd",
+}
+
+def _ext_pkg(php_version: str, ext_name: str) -> str:
+    """Nama paket Debian untuk extension. Unknown → fallback php<ver>-<ext>."""
+    suffix = _EXT_PKG.get(ext_name.lower(), ext_name)
+    if ext_name.lower() == "apcu":
+        return "php-apcu"  # paket global tanpa versi
+    return f"{php_version}-{suffix}"
 
 def _sudo_cmd(cmd: list[str]) -> list[str]:
     """Prefix sudo kalau bukan root & bukan mode demo/test."""

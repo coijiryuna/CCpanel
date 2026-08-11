@@ -85,3 +85,20 @@ def test_php_block_litespeed_lsapi():
     assert "proxy:unix:/run/php/php8.3-fpm-olsphp.example.com.sock" in text
     php_ops.remove_php_block("olsphp.example.com", vh)
     assert "BEGIN CCPANEL PHP" not in vh.read_text()
+
+def test_ext_pkg_mapping():
+    """Mapping extension → paket Debian benar."""
+    assert php_ops._ext_pkg("php8.3", "gd") == "php8.3-gd"
+    assert php_ops._ext_pkg("php8.2", "mysqli") == "php8.2-mysql"
+    assert php_ops._ext_pkg("php8.4", "redis") == "php8.4-redis"
+    assert php_ops._ext_pkg("php8.1", "apcu") == "php-apcu"
+    assert php_ops._ext_pkg("php8.3", "unknown_ext") == "php8.3-unknown_ext"
+
+def test_ext_pkg_has_many_entries():
+    """Daftar extension lengkap — minimal 30 mapping."""
+    assert len(php_ops._EXT_PKG) >= 30
+    for ext in ("gd", "curl", "mbstring", "zip", "mysql", "pgsql", "redis",
+                "imagick", "intl", "bcmath", "soap", "xdebug", "igbinary",
+                "msgpack", "memcached", "mongodb", "yaml", "uuid", "ssh2",
+                "apcu", "opcache", "pcntl", "sockets", "sqlite3", "xsl"):
+        assert ext in php_ops._EXT_PKG, f"{ext} harus ada di _EXT_PKG"
