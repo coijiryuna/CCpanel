@@ -16,8 +16,8 @@ SKILL.md
 
 # Node / frontend
 node_modules/
-dashboard/
-dashboard/node_modules/
+dashboard
+dashboard/dist/
 
 # Go
 cli/ccpanel/ccpanel
