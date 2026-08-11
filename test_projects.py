@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core import apps as apps_ops
 from core import nginx as nginx_ops
+from core import siteconfig as siteconfig_ops
+from fastapi import HTTPException
 
 
 def test_standalone_unit_node():
@@ -227,3 +229,67 @@ def test_project_vhost_invalid_domain():
         raise AssertionError("harus error: domain tidak valid")
     except nginx_ops.NginxError as e:
         assert "tidak valid" in str(e)
+
+
+def test_project_webconfig_rewrite_xss_log():
+    """Project berdomain: rewrite + XSS + accesslog lewat include sitefeat.
+    Vhost proxy `proj-<domain>.conf` harus include `{domain}.conf` (bukan
+    `proj-<domain>.conf` — regresi vhost.stem)."""
+    domain = "api.web.dev"
+    nginx_ops.project_proxy_enable(domain, 8305)
+    vh = nginx_ops.project_vhost_path(domain)
+    try:
+        siteconfig_ops.set_rewrite(domain, "rewrite ^/old$ /new permanent;", vh, domain)
+        siteconfig_ops.set_xss(domain, True, vh, domain)
+        siteconfig_ops.set_accesslog(domain, False, vh, domain)
+
+        # include benar: file fitur domain, bukan proj-domain
+        inc = f"include {siteconfig_ops.CONF_DIR / domain}.conf;"
+        assert inc in vh.read_text(encoding="utf-8")
+        assert f"proj-{domain}.conf" not in vh.read_text(encoding="utf-8")
+
+        st = siteconfig_ops.state(domain)
+        assert "rewrite ^/old$ /new permanent;" in st["rewrite_rules"]
+        assert st["xss_enabled"] is True
+        assert st["accesslog_enabled"] is False
+
+        # matikan fitur -> blok hilang, file fitur kosong
+        siteconfig_ops.set_rewrite(domain, "", vh, domain)
+        siteconfig_ops.set_xss(domain, False, vh, domain)
+        siteconfig_ops.set_accesslog(domain, True, vh, domain)
+        st = siteconfig_ops.state(domain)
+        assert st["rewrite_rules"] == ""
+        assert st["xss_enabled"] is False
+        assert st["accesslog_enabled"] is True
+    finally:
+        nginx_ops.project_proxy_disable(domain)
+
+
+def test_project_compose_paths_detects_files():
+    """Deteksi nama file compose: docker-compose.yml ATAU compose.yaml."""
+    from api import projects as projects_api
+
+    # docker-compose.yml
+    root = apps_ops.project_root("compose-a")
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "docker-compose.yml").write_text("services: {}\n")
+    compose, envf = projects_api._project_compose_paths({"root_path": str(root), "name": "compose-a"})
+    assert compose.name == "docker-compose.yml"
+    assert envf.name == ".env"
+
+    # compose.yaml (tanpa docker-compose.yml)
+    root2 = apps_ops.project_root("compose-b")
+    root2.mkdir(parents=True, exist_ok=True)
+    (root2 / "compose.yaml").write_text("services: {}\n")
+    compose2, _ = projects_api._project_compose_paths({"root_path": str(root2), "name": "compose-b"})
+    assert compose2.name == "compose.yaml"
+
+    # tak ada compose -> HTTPException 400
+    root3 = apps_ops.project_root("compose-c")
+    root3.mkdir(parents=True, exist_ok=True)
+    try:
+        projects_api._project_compose_paths({"root_path": str(root3), "name": "compose-c"})
+        raise AssertionError("harus error: compose tak ada")
+    except HTTPException as e:
+        assert e.status_code == 400
+        assert "compose" in str(e.detail).lower()

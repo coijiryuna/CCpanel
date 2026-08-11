@@ -26,6 +26,7 @@ def list_backups(
     search: str | None = None,
     order_col: str | None = None,
     order_dir: str = "asc",
+    type: str | None = None,
     user: dict = Depends(require_admin),
 ) -> list[BackupItem] | dict:
     start, length, draw = dt_params(start, length, draw)
@@ -33,6 +34,8 @@ def list_backups(
         items = [BackupItem(**i) for i in backup_ops.list_backups()]
     except backup_ops.BackupError as e:
         raise HTTPException(500, str(e)) from e
+    if type in ("site", "db"):
+        items = [i for i in items if i.type == type]
     if search:
         s = search.strip().lower()
         items = [i for i in items if s in i.name.lower() or s in i.type.lower()]

@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel
 
+from core import hotlink as hotlink_ops
 from core import php as php_ops
 from core import validate
 from core import waf as waf_ops
@@ -27,6 +28,7 @@ class SiteCreate(BaseModel):
     description: str = ""
     category: str = ""
     php_version: str = "static"
+    webserver: str = ""          # nginx/apache/litespeed, kosong = engine aktif
     create_ftp: bool = False
     ftp_username: str = ""
     ftp_password: str = ""
@@ -45,6 +47,7 @@ class SiteResponse(BaseModel):
     vhost_path: str
     enabled: bool
     waf_enabled: bool
+    hotlink_enabled: bool
     webserver: str
     php_version: str
     project_type: str
@@ -70,6 +73,7 @@ def _site_row(row, conn=None) -> SiteResponse:
         vhost_path=row["vhost_path"],
         enabled=bool(row["enabled"]),
         waf_enabled=bool(row["waf_enabled"]),
+        hotlink_enabled=bool(row["hotlink_enabled"]) if "hotlink_enabled" in row.keys() else False,
         webserver=row["webserver"] if "webserver" in row.keys() else "nginx",
         php_version=row["php_version"] if "php_version" in row.keys() else "static",
         project_type=row["project_type"] if "project_type" in row.keys() else "static",
@@ -95,7 +99,7 @@ def delete_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
             # hapus pool php-fpm + block fastcgi kalau site pakai PHP
             if row["php_version"] != "static":
                 php_ops.remove_pool(row["domain"], row["php_version"])
-                php_ops.remove_php_block(row["domain"], Path(row["vhost_path"]))
+                php_ops.remove_php_block(row["domain"], Path(row["vhost_path"]), row["webserver"])
             # hapus app runner kalau ada (systemd unit / docker compose)
             app = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (site_id,)).fetchone()
             if app is not None:
@@ -135,6 +139,10 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
         raise HTTPException(400, f"PHP version tidak valid. Pilihan: {', '.join(php_ops.PHP_VERSIONS)}")
     description = (req.description or "").strip()
     category = (req.category or "").strip()
+    # engine web server: kosong = engine aktif panel, else validasi
+    engine = (req.webserver or "").strip().lower() or webserver_ops.ACTIVE
+    if engine not in webserver_ops.ENGINES:
+        raise HTTPException(400, f"Web server tidak valid. Pilihan: {', '.join(webserver_ops.ENGINES)}")
 
     with get_db() as conn:
         if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone():
@@ -142,8 +150,9 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
         for d in extra:
             if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (d,)).fetchone():
                 raise HTTPException(409, f"Domain tambahan sudah dipakai situs lain: {d}")
+        eng = webserver_ops.for_engine(engine)
         try:
-            root = webserver_ops.create_site(domain)
+            root = eng.create_site(domain)
         except webserver_ops.WebserverError as e:
             raise HTTPException(500, str(e)) from e
 
@@ -153,14 +162,17 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
         db_created = None
         try:
             if extra:
-                webserver_ops.nginx_set_server_names(domain, [domain] + extra)
+                if engine == "nginx":
+                    webserver_ops.nginx_set_server_names(domain, [domain] + extra)
+                else:
+                    eng.nginx_set_server_names(domain, [domain] + extra) if hasattr(eng, "nginx_set_server_names") else None
             # insert site dulu supaya punya site_id
             cur = conn.execute(
                 "INSERT INTO sites (domain, root_path, vhost_path, enabled, owner_id, webserver, php_version, project_type, port, proxy_enabled, description, category, created_at) "
                 "VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
-                (domain, str(root), str(webserver_ops.vhost_path(domain)),
+                (domain, str(root), str(eng.vhost_path(domain)),
                  None if user["role"] == "admin" else user["id"],
-                 webserver_ops.ACTIVE, php_version, ptype, port,
+                 engine, php_version, ptype, port,
                  description, category,
                  datetime.now(timezone.utc).isoformat()),
             )
@@ -169,7 +181,7 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
                 conn.execute("INSERT INTO site_domains (site_id, domain) VALUES (?, ?)", (site_id, d))
             if php_version != "static":
                 php_ops.create_pool(domain, php_version)
-                php_ops.insert_php_block(domain, php_version, Path(webserver_ops.vhost_path(domain)))
+                php_ops.insert_php_block(domain, php_version, Path(eng.vhost_path(domain)), engine)
             if req.create_ftp:
                 username = (req.ftp_username or "").strip() or domain.split(".")[0]
                 password = (req.ftp_password or "").strip() or secrets.token_urlsafe(12)
@@ -221,11 +233,11 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
             if php_version != "static":
                 try:
                     php_ops.remove_pool(domain, php_version)
-                    php_ops.remove_php_block(domain, Path(webserver_ops.vhost_path(domain)))
+                    php_ops.remove_php_block(domain, Path(eng.vhost_path(domain)), engine)
                 except Exception:
                     pass
             try:
-                webserver_ops.remove_site(domain)
+                eng.remove_site(domain)
             except Exception:
                 pass
             if isinstance(e, HTTPException):
@@ -326,6 +338,25 @@ def waf_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
     webserver_ops.for_engine("nginx").nginx_reload()
     return {"ok": True, "waf_enabled": enabled}
 
+@app.post("/api/sites/{site_id}/hotlink")
+def hotlink_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
+    """Toggle hotlink protection per-site. Khusus engine nginx (valid_referers)."""
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        if row["webserver"] != "nginx":
+            raise HTTPException(400, f"Hotlink hanya untuk site nginx (site ini: {row['webserver']})")
+        vhost = Path(row["vhost_path"])
+        enabled = not bool(row["hotlink_enabled"])
+        try:
+            (hotlink_ops.enable if enabled else hotlink_ops.disable)(row["domain"], vhost)
+            webserver_ops.for_engine("nginx").nginx_test()
+        except webserver_ops.WebserverError as e:
+            raise HTTPException(500, str(e)) from e
+        conn.execute("UPDATE sites SET hotlink_enabled = ? WHERE id = ?", (int(enabled), site_id))
+        _log(conn, user, "hotlink.enable" if enabled else "hotlink.disable", row["domain"])
+    webserver_ops.for_engine("nginx").nginx_reload()
+    return {"ok": True, "hotlink_enabled": enabled}
+
 class SitePhpUpdate(BaseModel):
     php_version: str
 
@@ -337,11 +368,9 @@ def update_site_php(site_id: int, req: SitePhpUpdate, user: dict = Depends(requi
         raise HTTPException(400, f"PHP version tidak valid. Pilihan: {', '.join(valid_versions)}")
     with get_db() as conn:
         row = check_site_access(conn, site_id, user)
-        if row["webserver"] != "nginx":
-            raise HTTPException(400, f"PHP hanya untuk site nginx (site ini: {row['webserver']})")
         old_version = row["php_version"]
         try:
-            php_ops.set_php_version(row["domain"], old_version, req.php_version, Path(row["vhost_path"]))
+            php_ops.set_php_version(row["domain"], old_version, req.php_version, Path(row["vhost_path"]), row["webserver"])
         except php_ops.PhpError as e:
             raise HTTPException(500, str(e)) from e
         conn.execute("UPDATE sites SET php_version = ? WHERE id = ?", (req.php_version, site_id))

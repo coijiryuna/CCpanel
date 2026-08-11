@@ -103,6 +103,7 @@ def init_db() -> None:
                 vhost_path TEXT NOT NULL,
                 enabled    INTEGER NOT NULL DEFAULT 1,
                 waf_enabled INTEGER NOT NULL DEFAULT 0,
+                hotlink_enabled INTEGER NOT NULL DEFAULT 0,
                 owner_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 description TEXT NOT NULL DEFAULT '',
                 category   TEXT NOT NULL DEFAULT '',
@@ -182,6 +183,15 @@ def init_db() -> None:
                 owner_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS docker_domains (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                container   TEXT NOT NULL,
+                domain      TEXT NOT NULL,
+                port        INTEGER NOT NULL,
+                owner_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at  TEXT NOT NULL,
+                UNIQUE(domain)
+            );
             """
         )
         # migrasi: DB lama belum punya kolom baru
@@ -204,6 +214,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE sites ADD COLUMN port INTEGER NOT NULL DEFAULT 0")
         if "proxy_enabled" not in scols:
             conn.execute("ALTER TABLE sites ADD COLUMN proxy_enabled INTEGER NOT NULL DEFAULT 0")
+        if "hotlink_enabled" not in scols:
+            conn.execute("ALTER TABLE sites ADD COLUMN hotlink_enabled INTEGER NOT NULL DEFAULT 0")
         if "description" not in scols:
             conn.execute("ALTER TABLE sites ADD COLUMN description TEXT NOT NULL DEFAULT ''")
         if "category" not in scols:
@@ -231,6 +243,16 @@ def init_db() -> None:
             conn.execute("ALTER TABLE projects ADD COLUMN domain TEXT NOT NULL DEFAULT ''")
         if "owner_id" not in pcols:
             conn.execute("ALTER TABLE projects ADD COLUMN owner_id INTEGER REFERENCES users(id)")
+        if "root_path" not in pcols:
+            conn.execute("ALTER TABLE projects ADD COLUMN root_path TEXT NOT NULL DEFAULT ''")
+        if "run_opt" not in pcols:
+            conn.execute("ALTER TABLE projects ADD COLUMN run_opt TEXT NOT NULL DEFAULT ''")
+        if "node_version" not in pcols:
+            conn.execute("ALTER TABLE projects ADD COLUMN node_version TEXT NOT NULL DEFAULT ''")
+        if "go_version" not in pcols:
+            conn.execute("ALTER TABLE projects ADD COLUMN go_version TEXT NOT NULL DEFAULT ''")
+        if "pm2" not in pcols:
+            conn.execute("ALTER TABLE projects ADD COLUMN pm2 INTEGER NOT NULL DEFAULT 0")
         jcols = [r[1] for r in conn.execute("PRAGMA table_info(cron_jobs)").fetchall()]
         if "kind" not in jcols:
             conn.execute("ALTER TABLE cron_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'command'")

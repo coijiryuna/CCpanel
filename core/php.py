@@ -13,10 +13,11 @@ from pathlib import Path
 from . import webserver as webserver_ops
 from .nginx import WWW_ROOT
 
-PHP_VERSIONS = ["php8.1", "php8.2", "php8.3"]
+PHP_VERSIONS = ["php8.1", "php8.2", "php8.3", "php8.4"]
 DEFAULT_PHP_VERSION = "static"
 
 PHP_FPM_DIR = Path(os.environ.get("CCPANEL_PHP_FPM_DIR", "/etc/php"))
+SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
 
 PHP_VHOST_BEGIN = "# BEGIN CCPANEL PHP"
 PHP_VHOST_END = "# END CCPANEL PHP"
@@ -31,6 +32,28 @@ def _php_location_block(domain: str, php_version: str) -> str:
     }}
     {PHP_VHOST_END}
 """
+
+# Block PHP per engine web server. Fastcgi (nginx) vs proxy_fcgi (apache)
+# vs lsapi (OpenLiteSpeed). Socket pool sama: /run/php/php<ver>-fpm-<domain>.sock
+def _php_block_for(engine: str, domain: str, php_version: str) -> str:
+    ver = php_version[3:]
+    sock = f"/run/php/php{ver}-fpm-{domain}.sock"
+    if engine == "apache":
+        return f"""    {PHP_VHOST_BEGIN}
+    <FilesMatch "\\.php$">
+        SetHandler "proxy:unix:{sock}|fcgi://localhost"
+    </FilesMatch>
+    {PHP_VHOST_END}
+"""
+    if engine == "litespeed":
+        return f"""    {PHP_VHOST_BEGIN}
+    <FilesMatch "\\.php$">
+        SetHandler proxy:unix:{sock}|fcgi://localhost
+    </FilesMatch>
+    {PHP_VHOST_END}
+"""
+    # nginx (default)
+    return _php_location_block(domain, php_version)
 
 class PhpError(Exception):
     pass
@@ -57,7 +80,7 @@ def php_fpm_test(php_version: str) -> None:
 
 def php_fpm_reload(php_version: str) -> None:
     """Reload PHP-FPM for given version."""
-    res = _run(["systemctl", "reload", f"php{php_version[3:]}-fpm"])
+    res = _run([SYSTEMCTL, "reload", f"php{php_version[3:]}-fpm"])
     if res.returncode != 0:
         raise PhpError(res.stderr.strip() or f"systemctl reload php{php_version[3:]}-fpm failed")
 
@@ -123,18 +146,29 @@ def remove_pool(domain: str, php_version: str) -> None:
             raise
         php_fpm_reload(php_version)
 
-def set_php_version(domain: str, old_version: str, new_version: str, vhost: Path | None = None) -> None:
-    """Change PHP version for a site. Update pool + nginx vhost fastcgi block.
+def _detect_engine(vhost: Path) -> str:
+    """Fallback: tebak engine dari path vhost. Dipakai kalau engine tak dieksplisitkan."""
+    p = str(vhost)
+    if "/apache" in p or "sites-available" in p:
+        return "apache"
+    if "lsws" in p or "litespeed" in p:
+        return "litespeed"
+    return "nginx"
+
+
+def set_php_version(domain: str, old_version: str, new_version: str, vhost: Path | None = None,
+                    engine: str | None = None) -> None:
+    """Change PHP version for a site. Update pool + vhost block sesuai engine.
 
     vhost: path vhost site (dari DB). None = pakai engine aktif.
-    Block fastcgi syntax nginx-only — engine apache/litespeed ditolak di server.py.
+    engine: nginx/apache/litespeed. None = deteksi dari path vhost.
     """
     root = root_path(domain)
     if not root.is_dir():
         raise PhpError(f"Folder root tidak ada: {root}")
 
     # hapus block php lama dari vhost dulu (kalau ada)
-    remove_php_block(domain, vhost)
+    remove_php_block(domain, vhost, engine)
 
     # Remove old pool if not static
     if old_version != "static" and old_version in PHP_VERSIONS:
@@ -146,13 +180,13 @@ def set_php_version(domain: str, old_version: str, new_version: str, vhost: Path
 
     # sisip block fastcgi php ke vhost
     if new_version != "static":
-        insert_php_block(domain, new_version, vhost)
+        insert_php_block(domain, new_version, vhost, engine)
 
 def _vhost_path(domain: str, vhost: Path | None = None) -> Path:
     return vhost if vhost is not None else webserver_ops.vhost_path(domain)
 
-def remove_php_block(domain: str, vhost: Path | None = None) -> None:
-    """Hapus block fastcgi php dari vhost nginx site."""
+def remove_php_block(domain: str, vhost: Path | None = None, engine: str | None = None) -> None:
+    """Hapus block php dari vhost site (engine apa pun)."""
     vh = _vhost_path(domain, vhost)
     if not vh.exists():
         return
@@ -164,31 +198,42 @@ def remove_php_block(domain: str, vhost: Path | None = None) -> None:
     new_text = pattern.sub("\n", text)
     if new_text != text:
         vh.write_text(new_text)
+        eng = engine or _detect_engine(vh)
         try:
-            webserver_ops.for_engine("nginx").nginx_test()
+            webserver_ops.for_engine(eng).nginx_test()
         except webserver_ops.WebserverError:
             vh.write_text(text)
             raise
 
-def insert_php_block(domain: str, php_version: str, vhost: Path | None = None) -> None:
-    """Sisip block fastcgi php ke vhost nginx site sebelum `location /`."""
+def insert_php_block(domain: str, php_version: str, vhost: Path | None = None,
+                    engine: str | None = None) -> None:
+    """Sisip block php ke vhost site sesuai engine (nginx fastcgi / apache proxy_fcgi / OLS)."""
     vh = _vhost_path(domain, vhost)
     if not vh.exists():
         raise PhpError(f"vhost {vh} tidak ada")
     text = vh.read_text()
     if PHP_VHOST_BEGIN in text:
         return  # sudah ada block php
-    block = _php_location_block(domain, php_version)
-    # sisip sebelum location / { ... } paling akhir
-    if "location / {" in text:
-        text = text.replace("location / {", block + "    location / {", 1)
+    # engine eksplisit lebih dulu, fallback deteksi path
+    eng = engine or _detect_engine(vh)
+    block = _php_block_for(eng, domain, php_version)
+    if eng == "nginx":
+        # sisip sebelum location / { ... } paling akhir
+        if "location / {" in text:
+            text = text.replace("location / {", block + "    location / {", 1)
+        else:
+            text = text.rstrip() + "\n" + block
     else:
-        text = text.rstrip() + "\n" + block
+        # apache/litespeed: sisip sebelum </VirtualHost>
+        if "</VirtualHost>" in text:
+            text = text.replace("</VirtualHost>", block + "</VirtualHost>", 1)
+        else:
+            text = text.rstrip() + "\n" + block
     vh.write_text(text)
     try:
-        webserver_ops.for_engine("nginx").nginx_test()
+        webserver_ops.for_engine(eng).nginx_test()
     except webserver_ops.WebserverError:
-        remove_php_block(domain, vhost)
+        remove_php_block(domain, vhost, eng)
         raise
 
 def get_pool_status(domain: str) -> dict:

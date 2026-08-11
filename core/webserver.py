@@ -58,6 +58,14 @@ def set_enabled(domain: str, enabled: bool) -> None:
 def remove_site(domain: str) -> None:
     return _engine().remove_site(domain)
 
+def remove_vhost(domain: str) -> None:
+    """Hapus vhost saja (root tetap) — untuk switch engine per-site.
+    Engine tak punya remove_vhost = fallback remove_site (lama)."""
+    fn = getattr(_engine(), "remove_vhost", None)
+    if fn is None:
+        return remove_site(domain)
+    return fn(domain)
+
 
 def trash_items() -> list[dict]:
     return _engine().trash_items()

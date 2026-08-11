@@ -4,10 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
+# Secret di /etc/ccpanel.env (dibuat install.sh, mode 600)
 EnvironmentFile=-/etc/ccpanel.env
-Environment=PANEL_PASSWORD=password-sangat-kuat
-Environment=PANEL_JWT_SECRET=secret-panjang-acak
-Environment=CCPANEL_CERTBOT_EMAIL=admin@domainmu.com
 ExecStart=/opt/ccpanel/.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8888
 WorkingDirectory=/opt/ccpanel
 Restart=always

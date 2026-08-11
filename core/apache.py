@@ -22,6 +22,7 @@ from .nginx import (
 )
 
 APACHE_CONF_DIR = Path(os.environ.get("CCPANEL_APACHE_CONF_DIR", "/etc/apache2/sites-available"))
+SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
 
 VHOST_TEMPLATE = """<VirtualHost *:80>
     ServerName {domain}
@@ -55,7 +56,10 @@ def nginx_test() -> None:
 
 
 def nginx_reload() -> None:
-    res = _run(["systemctl", "reload", "apache2"])
+    # skip reload kalau service tak aktif (mis. apache diinstall tapi belum start)
+    if _run([SYSTEMCTL, "is-active", "--quiet", "apache2"]).returncode != 0:
+        return
+    res = _run([SYSTEMCTL, "reload", "apache2"])
     if res.returncode != 0:
         raise WebserverError(res.stderr.strip() or "systemctl reload apache2 failed")
 
@@ -124,6 +128,20 @@ def set_enabled(domain: str, enabled: bool) -> None:
         raise
     nginx_reload()
 
+
+def remove_vhost(domain: str) -> None:
+    """Hapus vhost saja — root TETAP. Untuk switch engine antar server."""
+    vh = vhost_path(domain)
+    backup = vh.read_text() if vh.exists() else None
+    if backup is not None:
+        vh.unlink()
+    try:
+        nginx_test()
+    except WebserverError:
+        if backup is not None:
+            vh.write_text(backup)
+        raise
+    nginx_reload()
 
 def remove_site(domain: str) -> None:
     vh = vhost_path(domain)

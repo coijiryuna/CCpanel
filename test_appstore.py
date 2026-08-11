@@ -39,6 +39,58 @@ def test_install_unknown_raises():
     except store.AppStoreError:
         pass
 
+def test_service_units_maps_php_and_apps():
+    units = store.service_units()
+    assert units.get("php8.4") == "php8.4-fpm"
+    assert units.get("nginx") == "nginx"
+    assert units.get("redis") == "redis-server"
+    assert units.get("docker") == "docker"
+    assert "node22" not in units  # node via nvm, bukan systemd
+
+def test_docker_in_catalog():
+    item = next(i for i in store.CATALOG if i["id"] == "docker")
+    assert item["category"] == "app"
+    assert item["service"] == "docker"
+    assert item["install"][0] == store.APT
+
+def test_webservers_in_catalog():
+    ids = {i["id"] for i in store.CATALOG}
+    assert {"nginx", "apache", "openlitespeed"} <= ids
+    apache = next(i for i in store.CATALOG if i["id"] == "apache")
+    assert apache["service"] == "apache2"
+    ols = next(i for i in store.CATALOG if i["id"] == "openlitespeed")
+    assert ols["service"] == "lsws"
+
+def test_service_action_unknown_action_raises():
+    try:
+        store.service_action("php8.4", "bogus")
+        assert False, "harus raise"
+    except store.AppStoreError:
+        pass
+
+def test_service_action_unknown_item_raises():
+    try:
+        store.service_action("nope", "start")
+        assert False, "harus raise"
+    except store.AppStoreError:
+        pass
+
+def test_service_action_requires_installed():
+    # php9.9 tidak ada di katalog → _find raise AppStoreError
+    try:
+        store.service_action("php7.4", "start")
+        assert False, "harus raise"
+    except store.AppStoreError:
+        pass
+
+def test_service_status_empty_without_service():
+    assert store.service_status("node22") == ""
+
+def test_list_catalog_has_service_field():
+    items = store.list_catalog()
+    assert all("service" in i for i in items)
+    assert any(i["id"] == "nginx" and i["service"] == "nginx" for i in items)
+
 def test_list_catalog_has_installed_flag():
     items = store.list_catalog()
     assert all("installed" in i for i in items)

@@ -8,7 +8,7 @@ Kategori:
   php    — versi PHP-FPM (7.4, 8.0, 8.1, 8.2, 8.3)
   node   — Node.js via nvm (v18, v20, v22, v24)
   go     — Go SDK (1.22, 1.23, 1.24)
-  app    — aplikasi pendukung (nginx, mysql, redis, git, composer, pm2, docker)
+  app    — aplikasi pendukung (nginx, apache, openlitespeed, mysql, redis, git, composer, pm2, docker, certbot)
 
 Env override utk testing:
   CCPANEL_APPSTORE_URL    URL JSON katalog remote (default None = pakai statis)
@@ -34,6 +34,8 @@ APPSTORE_LOG = Path(os.environ.get("CCPANEL_APPSTORE_LOG", "/var/log/ccpanel-app
 APPSTORE_URL = os.environ.get("CCPANEL_APPSTORE_URL") or None
 APPSTORE_CACHE = Path(os.environ.get("CCPANEL_APPSTORE_CACHE", "/var/cache/ccpanel-appstore.json"))
 APPSTORE_TTL = int(os.environ.get("CCPANEL_APPSTORE_TTL", "3600"))
+SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
+SERVICE_ACTIONS = {"start", "stop", "restart", "reload"}
 
 # id unik + command list-of-str + detect data-driven (bukan lambda) supaya
 # bisa diserialisasi ke JSON remote.
@@ -41,19 +43,22 @@ CATALOG: list[dict] = [
     # ---- PHP ----
     {"id": "php7.4", "name": "PHP 7.4", "category": "php", "desc": "PHP-FPM 7.4 (legacy)",
      "install": [APT, "install", "-y", "php7.4-fpm"], "uninstall": [APT, "remove", "-y", "php7.4-fpm"],
-     "detect": {"type": "which", "bin": ["php7.4", "php-fpm7.4"]}},
+     "detect": {"type": "which", "bin": ["php7.4", "php-fpm7.4"]}, "service": "php7.4-fpm"},
     {"id": "php8.0", "name": "PHP 8.0", "category": "php", "desc": "PHP-FPM 8.0",
      "install": [APT, "install", "-y", "php8.0-fpm"], "uninstall": [APT, "remove", "-y", "php8.0-fpm"],
-     "detect": {"type": "which", "bin": ["php8.0", "php-fpm8.0"]}},
+     "detect": {"type": "which", "bin": ["php8.0", "php-fpm8.0"]}, "service": "php8.0-fpm"},
     {"id": "php8.1", "name": "PHP 8.1", "category": "php", "desc": "PHP-FPM 8.1",
      "install": [APT, "install", "-y", "php8.1-fpm"], "uninstall": [APT, "remove", "-y", "php8.1-fpm"],
-     "detect": {"type": "which", "bin": ["php8.1", "php-fpm8.1"]}},
+     "detect": {"type": "which", "bin": ["php8.1", "php-fpm8.1"]}, "service": "php8.1-fpm"},
     {"id": "php8.2", "name": "PHP 8.2", "category": "php", "desc": "PHP-FPM 8.2",
      "install": [APT, "install", "-y", "php8.2-fpm"], "uninstall": [APT, "remove", "-y", "php8.2-fpm"],
-     "detect": {"type": "which", "bin": ["php8.2", "php-fpm8.2"]}},
+     "detect": {"type": "which", "bin": ["php8.2", "php-fpm8.2"]}, "service": "php8.2-fpm"},
     {"id": "php8.3", "name": "PHP 8.3", "category": "php", "desc": "PHP-FPM 8.3",
      "install": [APT, "install", "-y", "php8.3-fpm"], "uninstall": [APT, "remove", "-y", "php8.3-fpm"],
-     "detect": {"type": "which", "bin": ["php8.3", "php-fpm8.3"]}},
+     "detect": {"type": "which", "bin": ["php8.3", "php-fpm8.3"]}, "service": "php8.3-fpm"},
+    {"id": "php8.4", "name": "PHP 8.4", "category": "php", "desc": "PHP-FPM 8.4 (Debian 13/trixie)",
+     "install": [APT, "install", "-y", "php8.4-fpm"], "uninstall": [APT, "remove", "-y", "php8.4-fpm"],
+     "detect": {"type": "which", "bin": ["php8.4", "php-fpm8.4"]}, "service": "php8.4-fpm"},
     # ---- Node (nvm) ----
     {"id": "node18", "name": "Node.js 18", "category": "node", "desc": "Node.js v18 LTS via nvm",
      "install": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm install 18"],
@@ -87,16 +92,23 @@ CATALOG: list[dict] = [
     # ---- Aplikasi pendukung ----
     {"id": "nginx", "name": "Nginx", "category": "app", "desc": "Web server / reverse proxy",
      "install": [APT, "install", "-y", "nginx"], "uninstall": [APT, "remove", "-y", "nginx"],
-     "detect": {"type": "which", "bin": ["nginx"]}},
+     "detect": {"type": "which", "bin": ["nginx"]}, "service": "nginx"},
+    {"id": "apache", "name": "Apache", "category": "app", "desc": "Apache HTTP Server (apache2)",
+     "install": [APT, "install", "-y", "apache2"], "uninstall": [APT, "remove", "-y", "apache2"],
+     "detect": {"type": "which", "bin": ["apache2", "apache2ctl", "httpd"]}, "service": "apache2"},
+    {"id": "openlitespeed", "name": "OpenLiteSpeed", "category": "app", "desc": "LiteSpeed web server (lshttpd)",
+     "install": ["bash", "-lc", "curl -fsSL https://repo.litespeed.sh | bash && apt-get install -y openlitespeed"],
+     "uninstall": ["bash", "-lc", "apt-get remove -y openlitespeed"],
+     "detect": {"type": "which", "bin": ["lshttpd", "litespeed"]}, "service": "lsws"},
     {"id": "mariadb", "name": "MariaDB", "category": "app", "desc": "Database server",
      "install": [APT, "install", "-y", "mariadb-server"], "uninstall": [APT, "remove", "-y", "mariadb-server"],
-     "detect": {"type": "which", "bin": ["mysql", "mariadb"]}},
+     "detect": {"type": "which", "bin": ["mysql", "mariadb"]}, "service": "mariadb"},
     {"id": "redis", "name": "Redis", "category": "app", "desc": "In-memory key-value store",
      "install": [APT, "install", "-y", "redis-server"], "uninstall": [APT, "remove", "-y", "redis-server"],
-     "detect": {"type": "which", "bin": ["redis-server"]}},
+     "detect": {"type": "which", "bin": ["redis-server"]}, "service": "redis-server"},
     {"id": "postgresql", "name": "PostgreSQL", "category": "app", "desc": "Relational database",
      "install": [APT, "install", "-y", "postgresql"], "uninstall": [APT, "remove", "-y", "postgresql"],
-     "detect": {"type": "which", "bin": ["psql"]}},
+     "detect": {"type": "which", "bin": ["psql"]}, "service": "postgresql"},
     {"id": "composer", "name": "Composer", "category": "app", "desc": "PHP dependency manager",
      "install": ["bash", "-lc", "curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer"],
      "uninstall": ["rm", "-f", "/usr/local/bin/composer"],
@@ -111,6 +123,9 @@ CATALOG: list[dict] = [
     {"id": "git", "name": "Git", "category": "app", "desc": "Version control",
      "install": [APT, "install", "-y", "git"], "uninstall": [APT, "remove", "-y", "git"],
      "detect": {"type": "which", "bin": ["git"]}},
+    {"id": "docker", "name": "Docker", "category": "app", "desc": "Container runtime (docker.io)",
+     "install": [APT, "install", "-y", "docker.io"], "uninstall": [APT, "remove", "-y", "docker.io"],
+     "detect": {"type": "which", "bin": ["docker"]}, "service": "docker"},
 ]
 
 
@@ -229,6 +244,7 @@ def list_catalog() -> list[dict]:
         out.append({
             "id": item["id"], "name": item["name"], "category": item["category"],
             "desc": item.get("desc", ""), "installed": installed,
+            "service": item.get("service", ""),
         })
     return out
 
@@ -260,6 +276,37 @@ def _find(item_id: str) -> dict:
         if item["id"] == item_id:
             return item
     raise AppStoreError(f"App tidak dikenal: {item_id}")
+
+def service_units() -> dict[str, str]:
+    """Map id item → nama unit systemd (hanya item yang punya service)."""
+    return {i["id"]: i["service"] for i in _load_catalog() if i.get("service")}
+
+def service_action(item_id: str, action: str) -> dict:
+    """start/stop/restart/reload service systemd milik item."""
+    if action not in SERVICE_ACTIONS:
+        raise AppStoreError(f"Action tak dikenal: {action}")
+    item = _find(item_id)
+    unit = item.get("service")
+    if not unit:
+        raise AppStoreError(f"{item['name']} tidak punya service systemd")
+    if not _detect(item["detect"]):
+        raise AppStoreError(f"{item['name']} tidak terinstall")
+    res = _run([SYSTEMCTL, action, unit])
+    if res.returncode != 0:
+        raise AppStoreError(res.stderr.strip() or res.stdout.strip() or f"systemctl {action} {unit} gagal")
+    return {"ok": True, "id": item_id, "name": item["name"], "action": action, "unit": unit}
+
+def service_status(item_id: str) -> str:
+    """Status systemd: active / inactive / failed / unknown. '' kalau tanpa service."""
+    try:
+        item = _find(item_id)
+    except AppStoreError:
+        return ""
+    unit = item.get("service")
+    if not unit:
+        return ""
+    res = _run([SYSTEMCTL, "is-active", unit])
+    return res.stdout.strip() or "unknown"
 
 
 def _log_install(item_id: str, action: str, res: subprocess.CompletedProcess) -> None:

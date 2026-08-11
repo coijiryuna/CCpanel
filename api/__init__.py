@@ -9,6 +9,7 @@ from . import (  # noqa: F401  (import = register route ke app)
     backups,
     cron,
     dbs,
+    docker,
     files,
     files_generic,
     ftp,

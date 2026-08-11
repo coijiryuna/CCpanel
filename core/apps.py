@@ -36,6 +36,8 @@ class AppError(Exception):
 def _run(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise AppError(f"Perintah tidak ditemukan: {cmd[0]}")
     except subprocess.TimeoutExpired as e:
         raise AppError(f"Timeout: {' '.join(cmd)}") from e
 
@@ -287,7 +289,7 @@ def _write_unit_to(path: Path, label: str, root: Path, app_type: str, port: int,
 # ----------------------------------------------------------------- control
 
 def systemctl(*args: str) -> subprocess.CompletedProcess:
-    return _run(["systemctl", *args])
+    return _run([os.environ.get("CCPANEL_SYSTEMCTL", "systemctl"), *args])
 
 
 def create_app(domain: str, root: Path, app_type: str, port: int, entry: str,
@@ -396,7 +398,11 @@ def standalone_status(name: str, app_type: str) -> dict:
     """Status project standalone + PID (systemd MainPID)."""
     if app_type == "docker":
         root = project_root(name)
-        res = _run([DOCKER_BIN, "compose", "-f", str(_compose_file(root)), "ps", "--format", "{{.Status}}"])
+        try:
+            res = _run([DOCKER_BIN, "compose", "-f", str(_compose_file(root)), "ps", "--format", "{{.Status}}"])
+        except AppError as e:
+            # docker tak terinstall → service tak mungkin jalan
+            return {"state": "inactive", "detail": str(e)}
         if res.returncode != 0:
             return {"state": "inactive", "detail": res.stderr.strip()}
         out = res.stdout.strip()
@@ -427,7 +433,10 @@ def app_status(domain: str, root: Path, app_type: str) -> dict:
     """Status aktif. systemd: `is-active`. docker: `compose ps` (parsing
     container status line). Kalau unit tidak ada → "inactive"."""
     if app_type == "docker":
-        res = _run([DOCKER_BIN, "compose", "-f", str(_compose_file(root)), "ps", "--format", "{{.Status}}"])
+        try:
+            res = _run([DOCKER_BIN, "compose", "-f", str(_compose_file(root)), "ps", "--format", "{{.Status}}"])
+        except AppError as e:
+            return {"state": "inactive", "detail": str(e)}
         if res.returncode != 0:
             return {"state": "inactive", "detail": res.stderr.strip()}
         out = res.stdout.strip()

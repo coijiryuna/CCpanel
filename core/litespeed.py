@@ -131,6 +131,20 @@ def set_enabled(domain: str, enabled: bool) -> None:
     nginx_reload()
 
 
+def remove_vhost(domain: str) -> None:
+    """Hapus vhost saja — root TETAP. Untuk switch engine antar server."""
+    vh = vhost_path(domain)
+    backup = vh.read_text() if vh.exists() else None
+    if backup is not None:
+        vh.unlink()
+    try:
+        nginx_test()
+    except WebserverError:
+        if backup is not None:
+            vh.write_text(backup)
+        raise
+    nginx_reload()
+
 def remove_site(domain: str) -> None:
     vh = vhost_path(domain)
     backup = vh.read_text() if vh.exists() else None

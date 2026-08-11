@@ -16,6 +16,7 @@ from . import validate
 NGINX_CONF_DIR = Path(os.environ.get("CCPANEL_NGINX_CONF_DIR", "/etc/nginx/conf.d"))
 WWW_ROOT = Path(os.environ.get("CCPANEL_WWW_ROOT", "/www/wwwroot"))
 TRASH_DIR = Path(os.environ.get("CCPANEL_TRASH_DIR", "/www/trash"))
+SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
 
 VHOST_TEMPLATE = """server {{
     listen 80;
@@ -65,7 +66,10 @@ def nginx_test() -> None:
 
 
 def nginx_reload() -> None:
-    res = _run(["systemctl", "reload", "nginx"])
+    # skip reload kalau service tak aktif (mis. apache diinstall tapi belum start)
+    if _run([SYSTEMCTL, "is-active", "--quiet", "nginx"]).returncode != 0:
+        return
+    res = _run([SYSTEMCTL, "reload", "nginx"])
     if res.returncode != 0:
         raise NginxError(res.stderr.strip() or "systemctl reload nginx failed")
 
@@ -394,6 +398,21 @@ def set_enabled(domain: str, enabled: bool) -> None:
             vh.rename(disabled)
         else:
             disabled.rename(vh)
+        raise
+    nginx_reload()
+
+def remove_vhost(domain: str) -> None:
+    """Hapus vhost saja — root TETAP. Untuk switch engine antar server.
+    Tidak menyentuh folder root (beda dari remove_site yang trash)."""
+    vh = vhost_path(domain)
+    backup = vh.read_text() if vh.exists() else None
+    if backup is not None:
+        vh.unlink()
+    try:
+        nginx_test()
+    except NginxError:
+        if backup is not None:
+            vh.write_text(backup)
         raise
     nginx_reload()
 

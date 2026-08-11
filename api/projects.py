@@ -10,11 +10,13 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, HTTPException
+import yaml
+from fastapi import Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from core import apps as apps_ops
 from core import nginx as nginx_ops
+from core import siteconfig as siteconfig_ops
 from core import validate
 
 from .deps import _log, app, dt_order, dt_params, dt_response, get_db, require_auth
@@ -348,3 +350,135 @@ def detach_project_domain(project_id: int, user: dict = Depends(require_auth)) -
         _log(conn, user, "project.domain-remove", f"{row['name']}: -{row['domain']}")
         row2 = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     return _project_row(conn, row2)
+
+# ------------------------------------------- fitur web project berdomain
+
+def _project_vhost(row) -> Path:
+    """Vhost proxy project. Berdomain saja — tanpa domain tidak ada vhost."""
+    if not row["domain"]:
+        raise HTTPException(400, "Project belum punya domain — pasang domain dulu")
+    vh = nginx_ops.project_vhost_path(row["domain"])
+    if not vh.exists():
+        raise HTTPException(500, f"vhost {vh} tidak ada")
+    return vh
+
+@app.get("/api/projects/{project_id}/webconfig")
+def get_project_webconfig(project_id: int, user: dict = Depends(require_auth)) -> dict:
+    """State fitur web project berdomain: rewrite, anti-XSS, access log, vhost."""
+    with get_db() as conn:
+        row = _check_project(conn, project_id, user)
+        vh = _project_vhost(row)
+        feats = siteconfig_ops.state(row["domain"])
+    return {
+        "domain": row["domain"],
+        "vhost_path": str(vh),
+        "vhost_content": vh.read_text(encoding="utf-8"),
+        "rewrite_rules": feats["rewrite_rules"],
+        "xss_enabled": feats["xss_enabled"],
+        "accesslog_enabled": feats["accesslog_enabled"],
+    }
+
+@app.put("/api/projects/{project_id}/webconfig")
+async def put_project_webconfig(project_id: int, req: Request, user: dict = Depends(require_auth)) -> dict:
+    """Simpan fitur web project berdomain. Test + reload. Rollback kalau gagal."""
+    import json
+
+    try:
+        body = json.loads(await req.body() or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Body bukan JSON valid") from None
+
+    with get_db() as conn:
+        row = _check_project(conn, project_id, user)
+        vh = _project_vhost(row)
+        domain = row["domain"]
+        backup = vh.read_text(encoding="utf-8")
+        try:
+            # vhost content dulu — fitur sisip include ke file ini
+            if "vhost_content" in body:
+                vh.write_text(body["vhost_content"])
+            if "rewrite_rules" in body:
+                siteconfig_ops.set_rewrite(domain, body.get("rewrite_rules", ""), vh, domain)
+            if "xss_enabled" in body:
+                siteconfig_ops.set_xss(domain, bool(body["xss_enabled"]), vh, domain)
+            if "accesslog_enabled" in body:
+                siteconfig_ops.set_accesslog(domain, bool(body["accesslog_enabled"]), vh, domain)
+            nginx_ops.nginx_test()
+        except (nginx_ops.NginxError, siteconfig_ops.Error) as e:
+            vh.write_text(backup)
+            raise HTTPException(400, str(e)) from e
+        _log(conn, user, "project.webconfig", f"{row['name']}: {domain}")
+    nginx_ops.nginx_reload()
+    return {"ok": True}
+
+
+# ------------------------------------------- compose + env project docker
+
+def _project_compose_paths(row) -> tuple[Path, Path]:
+    """(file_compose, file_env) project docker. Deteksi compose.yaml juga."""
+    root = Path(row["root_path"]) if row["root_path"] else apps_ops.project_root(row["name"])
+    compose = None
+    for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yaml", "compose.yml"):
+        cand = root / name
+        if cand.exists():
+            compose = cand
+            break
+    if compose is None:
+        raise HTTPException(400, f"File compose tidak ada di {root} (docker-compose.yml / compose.yaml)")
+    return compose, root / ".env"
+
+
+@app.get("/api/projects/{project_id}/compose")
+def get_project_compose(project_id: int, user: dict = Depends(require_auth)) -> dict:
+    """Baca docker-compose.yml + .env project docker. 400 kalau bukan docker."""
+    with get_db() as conn:
+        row = _check_project(conn, project_id, user)
+        if row["app_type"] != "docker":
+            raise HTTPException(400, "Fitur ini khusus project docker (app_type=docker)")
+        compose, envf = _project_compose_paths(row)
+    return {
+        "compose_path": str(compose),
+        "compose_content": compose.read_text(encoding="utf-8"),
+        "env_path": str(envf),
+        "env_content": envf.read_text(encoding="utf-8") if envf.exists() else "",
+    }
+
+
+@app.put("/api/projects/{project_id}/compose")
+async def put_project_compose(project_id: int, req: Request, user: dict = Depends(require_auth)) -> dict:
+    """Simpan docker-compose.yml + .env. YAML divalidasi; compose config kalau
+    docker jalan; rollback kalau gagal. Tanpa restart — compose up manual."""
+    import json
+
+    try:
+        body = json.loads(await req.body() or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Body bukan JSON valid") from None
+
+    with get_db() as conn:
+        row = _check_project(conn, project_id, user)
+        if row["app_type"] != "docker":
+            raise HTTPException(400, "Fitur ini khusus project docker (app_type=docker)")
+        compose, envf = _project_compose_paths(row)
+        backup_c = compose.read_text(encoding="utf-8") if compose.exists() else ""
+        backup_e = envf.read_text(encoding="utf-8") if envf.exists() else ""
+        try:
+            if "compose_content" in body:
+                content = body["compose_content"]
+                if isinstance(content, str):
+                    yaml.safe_load(content)  # ValueError/YAMLError → 400
+                compose.write_text(content)
+            if "env_content" in body:
+                envf.write_text(body["env_content"])
+            # validasi compose config kalau docker daemon hidup (skip kalau error)
+            try:
+                apps_ops._run([apps_ops.DOCKER_BIN, "compose", "-f", str(compose), "config", "--quiet"])
+            except apps_ops.AppError:
+                pass
+        except (yaml.YAMLError, ValueError, OSError) as e:
+            compose.write_text(backup_c)
+            if envf.exists():
+                envf.write_text(backup_e)
+            raise HTTPException(400, f"compose tidak valid: {e}") from e
+        _log(conn, user, "project.compose", f"{row['name']}: {compose.name}")
+    return {"ok": True}

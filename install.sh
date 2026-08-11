@@ -1,16 +1,80 @@
 #!/usr/bin/env bash
-# Install CCPanel di Ubuntu 22.04 / Debian 12 fresh install.
+# Install CCPanel di Ubuntu 20.04/22.04/24.04 / Debian 11/12/13 / Linux Mint.
 # Jalankan sebagai root: sudo bash install.sh
 set -euo pipefail
 
-echo "==> Install paket sistem"
-apt update
-apt install -y nginx mariadb-server php8.1-fpm php8.2-fpm php8.3-fpm python3-venv python3-pip nodejs npm certbot python3-certbot-nginx
+. /etc/os-release   # set ID, VERSION_CODENAME
+
+echo "==> Deteksi OS: $ID $VERSION_CODENAME ($VERSION_ID)"
+
+# --- Repo PHP yang dibutuhkan ---
+# Ubuntu: PPA ondrej/php (php8.1-8.3, tak ada di repo resmi)
+# Debian 11/12: repo sury (php8.1-8.3, repo resmi cuma 7.4/8.2)
+# Debian 13 / Mint (trixie base): php8.4 ada di repo resmi — tak butuh repo tambahan
+setup_php_repos() {
+  case "$ID" in
+    ubuntu)
+      apt install -y software-properties-common
+      add-apt-repository -y ppa:ondrej/php
+      ;;
+    debian)
+      case "$VERSION_CODENAME" in
+        bookworm|trixie|gigi)
+          apt update   # php8.2/8.4 di repo resmi
+          ;;
+        *)
+          # Debian lama (bullseye dkk) — pakai repo sury
+          wget -qO /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg
+          echo "deb https://packages.sury.org/php/ $VERSION_CODENAME main" > /etc/apt/sources.list.d/php.list
+          apt update
+          ;;
+      esac
+      ;;
+    linuxmint)
+      case "$VERSION_CODENAME" in
+        gigi|virginia)
+          apt update   # php8.4 di repo resmi (base trixie)
+          ;;
+        *)
+          # Mint base jammy — sama seperti Ubuntu, butuh ondrej
+          apt install -y software-properties-common
+          add-apt-repository -y ppa:ondrej/php
+          ;;
+      esac
+      ;;
+    *)
+      echo "==> OS tak dikenal ($ID) — lewati setup repo PHP, pakai paket bawaan"
+      apt update
+      ;;
+  esac
+}
+
+# --- Paket PHP-FPM per rilis ---
+case "$ID-$VERSION_CODENAME" in
+  ubuntu-*|linuxmint-victoria|linuxmint-faye|linuxmint-una)
+    # jammy/noble base: semua versi dari PPA ondrej
+    PHP_PKGS="php8.1-fpm php8.2-fpm php8.3-fpm"
+    ;;
+  debian-bookworm)
+    PHP_PKGS="php8.2-fpm"
+    ;;
+  debian-trixie|linuxmint-gigi|linuxmint-virginia|debian-gigi)
+    PHP_PKGS="php8.4-fpm"
+    ;;
+  *)
+    PHP_PKGS="php8.1-fpm php8.2-fpm php8.3-fpm php8.4-fpm"
+    ;;
+esac
+
+setup_php_repos
+
+echo "==> Install paket sistem ($PHP_PKGS)"
+apt install -y nginx mariadb-server $PHP_PKGS python3-venv python3-pip nodejs npm certbot python3-certbot-nginx
 
 APP_DIR="${APP_DIR:-/opt/ccpanel}"
 echo "==> Salin project ke $APP_DIR"
 mkdir -p "$APP_DIR"
-cp -r server.py core requirements.txt frontend static "$APP_DIR/"
+cp -r server.py api core requirements.txt dashboard static "$APP_DIR/"
 
 cd "$APP_DIR"
 echo "==> Backend venv"
@@ -18,13 +82,38 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
 echo "==> Build frontend"
-cd frontend && npm install && npm run build && cd ..
+cd dashboard && npm install && npm run build && cd ..
 
 echo "==> Folder website + trash"
 mkdir -p /www/wwwroot /www/trash
 
+echo "==> Systemd service + env"
+# Secret otomatis kalau belum diset (mis. install ulang)
+if [ -z "${PANEL_PASSWORD:-}" ]; then PANEL_PASSWORD="$(openssl rand -base64 24)"; fi
+if [ -z "${PANEL_JWT_SECRET:-}" ]; then PANEL_JWT_SECRET="$(openssl rand -hex 32)"; fi
+if [ -z "${CCPANEL_CERTBOT_EMAIL:-}" ]; then CCPANEL_CERTBOT_EMAIL="admin@$(hostname -f 2>/dev/null || echo localhost)"; fi
+
+# EnvironmentFile — isi rahasia, mode 600
+cat > /etc/ccpanel.env <<EOF
+PANEL_PASSWORD=$PANEL_PASSWORD
+PANEL_JWT_SECRET=$PANEL_JWT_SECRET
+CCPANEL_CERTBOT_EMAIL=$CCPANEL_CERTBOT_EMAIL
+EOF
+chmod 600 /etc/ccpanel.env
+
+# Unit systemd
+cp scripts/ccpanel.service /etc/systemd/system/ccpanel.service
+systemctl daemon-reload
+systemctl enable --now ccpanel
+sleep 2
+systemctl --no-pager --lines=5 status ccpanel
+
+# Sisa rahasia tak boleh di-echo penuh — tampilkan sekali lalu simpan
 echo ""
-echo "Selesai. Langkah berikutnya:"
-echo "  1. export PANEL_PASSWORD='password-kuat' PANEL_JWT_SECRET=\$(openssl rand -hex 32) CCPANEL_CERTBOT_EMAIL='admin@domainmu.com'"
-echo "  2. sudo -E $APP_DIR/.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8888"
-echo "  3. Akses via SSH tunnel: ssh -L 8888:127.0.0.1:8888 user@vps-ip"
+echo "=================================================="
+echo "Selesai. Panel jalan: http://127.0.0.1:8888"
+echo "Login: admin / $PANEL_PASSWORD"
+echo "Credential tersimpan di /etc/ccpanel.env (mode 600)"
+echo "=================================================="
+echo "Akses remote via SSH tunnel:"
+echo "  ssh -L 8888:127.0.0.1:8888 user@vps-ip"

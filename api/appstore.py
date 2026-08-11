@@ -31,3 +31,18 @@ def appstore_uninstall(item_id: str, user: dict = Depends(require_auth), db=Depe
         raise HTTPException(400, str(e))
     _log(db, user, "appstore.uninstall", item_id)
     return res
+
+@app.post("/api/appstore/{item_id}/service/{action}")
+def appstore_service(item_id: str, action: str, user: dict = Depends(require_auth), db=Depends(get_db)):
+    """start/stop/restart/reload service systemd milik item app store."""
+    try:
+        res = store.service_action(item_id, action)
+    except store.AppStoreError as e:
+        raise HTTPException(400, str(e))
+    _log(db, user, f"appstore.service.{action}", item_id)
+    return res
+
+@app.get("/api/appstore/{item_id}/service/status")
+def appstore_service_status(item_id: str, _=Depends(require_auth)):
+    """Status service systemd item (active/inactive/failed/'')."""
+    return {"id": item_id, "status": store.service_status(item_id)}

@@ -27,9 +27,21 @@ def _stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
+_COMPOUND_SUFFIXES = (".tar.gz", ".sql.gz")
+
 def _unique_path(p: Path) -> Path:
     if not p.exists():
         return p
+    # sisipkan stamp sebelum suffix majemuk (.tar.gz/.sql.gz), bukan setelahnya
+    for suf in _COMPOUND_SUFFIXES:
+        if p.name.endswith(suf):
+            stem = p.name[: -len(suf)]
+            cand = p.with_name(f"{stem}.{_stamp()}{suf}")
+            n = 1
+            while cand.exists():
+                cand = p.with_name(f"{stem}.{_stamp()}-{n}{suf}")
+                n += 1
+            return cand
     return p.with_name(f"{p.stem}.{_stamp()}{p.suffix}")
 
 

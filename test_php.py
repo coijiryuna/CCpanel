@@ -49,3 +49,39 @@ def test_invalid_version_rejected():
     except php_ops.PhpError:
         return
     raise AssertionError("php5.6 harus ditolak")
+
+def test_php_block_apache_proxy_fcgi():
+    """Apache vhost: block PHP pakai FilesMatch proxy:unix fcgi, bukan location fastcgi."""
+    vh = Path(webserver_ops.for_engine("apache").vhost_path("apachephp.example.com"))
+    vh.parent.mkdir(parents=True, exist_ok=True)
+    vh.write_text("""<VirtualHost *:80>
+    ServerName apachephp.example.com
+    DocumentRoot /tmp/x
+</VirtualHost>
+""")
+    php_ops.insert_php_block("apachephp.example.com", "php8.4", vh)
+    text = vh.read_text()
+    assert "BEGIN CCPANEL PHP" in text
+    assert "<FilesMatch" in text
+    assert r'"\.php$"' in text
+    assert "proxy:unix:/run/php/php8.4-fpm-apachephp.example.com.sock" in text
+    assert "location ~" not in text
+    # hapus bersih
+    php_ops.remove_php_block("apachephp.example.com", vh)
+    assert "BEGIN CCPANEL PHP" not in vh.read_text()
+
+def test_php_block_litespeed_lsapi():
+    """OpenLiteSpeed vhost: block PHP pakai SetHandler proxy fcgi (lsapi-style)."""
+    vh = Path(webserver_ops.for_engine("litespeed").vhost_path("olsphp.example.com"))
+    vh.parent.mkdir(parents=True, exist_ok=True)
+    vh.write_text("""<VirtualHost *:80>
+    ServerName olsphp.example.com
+    DocumentRoot /tmp/x
+</VirtualHost>
+""")
+    php_ops.insert_php_block("olsphp.example.com", "php8.3", vh)
+    text = vh.read_text()
+    assert "BEGIN CCPANEL PHP" in text
+    assert "proxy:unix:/run/php/php8.3-fpm-olsphp.example.com.sock" in text
+    php_ops.remove_php_block("olsphp.example.com", vh)
+    assert "BEGIN CCPANEL PHP" not in vh.read_text()
