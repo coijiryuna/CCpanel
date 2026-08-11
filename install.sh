@@ -114,8 +114,23 @@ CCPANEL_CERTBOT_EMAIL=$CCPANEL_CERTBOT_EMAIL
 EOF
 chmod 600 /etc/ccpanel.env
 
-# Unit systemd
-cp scripts/ccpanel.service /etc/systemd/system/ccpanel.service
+# Unit systemd (ditulis langsung — tak bergantung file scripts/ccpanel.service)
+cat > /etc/systemd/system/ccpanel.service <<EOF
+[Unit]
+Description=CCPanel
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/ccpanel.env
+ExecStart=$APP_DIR/.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8888
+WorkingDirectory=$APP_DIR
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
 systemctl daemon-reload
 systemctl enable --now ccpanel
 sleep 2
