@@ -22,7 +22,7 @@ export CCPANEL_WEBSERVER="${CCPANEL_WEBSERVER:-nginx}"
 # --- Mock binary nginx/apachectl/systemctl (dev aman, tak sentuh service asli) ---
 _MOCK="$CCPANEL_DATA_DIR/devbin"
 mkdir -p "$_MOCK"
-for b in nginx apachectl systemctl; do
+for b in nginx apachectl systemctl mysql mariadb php-fpm8.1 php-fpm8.2 php-fpm8.3 php-fpm8.4; do
   if [ ! -x "$_MOCK/$b" ]; then
     printf '#!/bin/sh\nexit 0\n' > "$_MOCK/$b"
     chmod +x "$_MOCK/$b"

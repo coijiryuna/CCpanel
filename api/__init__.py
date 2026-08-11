@@ -7,6 +7,7 @@ from . import (  # noqa: F401  (import = register route ke app)
     appstore,
     auth,
     backups,
+    cms,
     cron,
     dbs,
     docker,
