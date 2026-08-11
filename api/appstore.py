@@ -10,13 +10,14 @@ from .deps import _log, app, get_db, require_auth
 
 @app.get("/api/appstore")
 def appstore_list(_=Depends(require_auth), db=Depends(get_db)):
-    return {"ok": True, "items": store.list_catalog()}
+    return {"ok": True, "items": store.list_catalog(), "tasks": store.task_list()}
 
 
 @app.post("/api/appstore/{item_id}/install")
 def appstore_install(item_id: str, user: dict = Depends(require_auth), db=Depends(get_db)):
+    """Mulai install async. Frontend polling /api/appstore/tasks/{key}."""
     try:
-        res = store.install(item_id)
+        res = store.start_task(item_id, "install")
     except store.AppStoreError as e:
         raise HTTPException(400, str(e))
     _log(db, user, "appstore.install", item_id)
@@ -25,12 +26,18 @@ def appstore_install(item_id: str, user: dict = Depends(require_auth), db=Depend
 
 @app.post("/api/appstore/{item_id}/uninstall")
 def appstore_uninstall(item_id: str, user: dict = Depends(require_auth), db=Depends(get_db)):
+    """Mulai uninstall async."""
     try:
-        res = store.uninstall(item_id)
+        res = store.start_task(item_id, "uninstall")
     except store.AppStoreError as e:
         raise HTTPException(400, str(e))
     _log(db, user, "appstore.uninstall", item_id)
     return res
+
+@app.get("/api/appstore/tasks/{key}")
+def appstore_task_status(key: str, _=Depends(require_auth)):
+    """Status + output task install/uninstall."""
+    return store.task_status(key)
 
 @app.post("/api/appstore/{item_id}/service/{action}")
 def appstore_service(item_id: str, action: str, user: dict = Depends(require_auth), db=Depends(get_db)):

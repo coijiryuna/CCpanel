@@ -124,3 +124,41 @@ def test_load_catalog_uses_remote_cache():
         store.APPSTORE_URL = None
         if store.APPSTORE_CACHE.exists():
             store.APPSTORE_CACHE.unlink()
+
+def _wait_task(key: str, timeout: float = 10.0) -> dict:
+    """Tunggu task selesai (polling kecil), return status akhir."""
+    import time as _t
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        st = store.task_status(key)
+        if st["done"]:
+            return st
+        _t.sleep(0.05)
+    return store.task_status(key)
+
+def test_start_task_install_streams_and_done():
+    # echo (APT mock di conftest) sukses → task done, ada output
+    res = store.start_task("php7.4", "install")
+    assert res["ok"] is True
+    st = _wait_task(res["key"])
+    assert st["status"] == "done"
+    assert st["error"] == ""
+    assert any("install" in l for l in st["lines"])
+
+def test_start_task_uninstall_raises_when_not_installed():
+    try:
+        store.start_task("php7.4", "uninstall")
+        assert False, "harus raise"
+    except store.AppStoreError:
+        pass
+
+def test_task_status_unknown_key_returns_done():
+    st = store.task_status("nope:install:0")
+    assert st["done"] is True
+
+def test_start_task_unknown_raises():
+    try:
+        store.start_task("nope", "install")
+        assert False, "harus raise"
+    except store.AppStoreError:
+        pass

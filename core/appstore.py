@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -36,6 +37,96 @@ APPSTORE_CACHE = Path(os.environ.get("CCPANEL_APPSTORE_CACHE", "/var/cache/ccpan
 APPSTORE_TTL = int(os.environ.get("CCPANEL_APPSTORE_TTL", "3600"))
 SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
 SERVICE_ACTIONS = {"start", "stop", "restart", "reload"}
+
+# ------------------------------------------------------------------ task async
+# Task install/uninstall jalan di background thread. Frontend polling status
+# + output per baris (tail). Status: running / done / error.
+_TASKS: dict[str, dict] = {}
+_TASKS_LOCK = threading.Lock()
+
+def _task(key: str) -> dict:
+    with _TASKS_LOCK:
+        t = _TASKS.setdefault(key, {"status": "running", "lines": [], "error": "", "done": False})
+    return t
+
+def _task_append(key: str, line: str) -> None:
+    with _TASKS_LOCK:
+        t = _TASKS.setdefault(key, {"status": "running", "lines": [], "error": "", "done": False})
+        t["lines"].append(line)
+        if len(t["lines"]) > 2000:
+            t["lines"] = t["lines"][-2000:]
+
+def _task_finish(key: str, ok: bool, error: str = "") -> None:
+    with _TASKS_LOCK:
+        t = _TASKS.setdefault(key, {"status": "running", "lines": [], "error": "", "done": False})
+        t["status"] = "done" if ok else "error"
+        t["error"] = error
+        t["done"] = True
+
+def _run_stream(cmd: list[str], key: str, timeout: int = 1800) -> None:
+    """Jalankan command, stream output baris per baris ke task key."""
+    _task_append(key, f"$ {' '.join(cmd)}")
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            bufsize=1,
+        )
+    except Exception as e:
+        _task_finish(key, False, str(e))
+        return
+    try:
+        assert proc.stdout is not None
+        for raw in proc.stdout:
+            line = raw.rstrip("\n")
+            if line:
+                _task_append(key, line)
+        rc = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        _task_finish(key, False, f"Timeout ({timeout}s)")
+        return
+    _task_finish(key, rc == 0, "" if rc == 0 else f"exit code {rc}")
+
+def _stream_worker(item: dict, action: str, key: str) -> None:
+    """Worker thread: jalankan install/uninstall item, stream ke task."""
+    try:
+        cmd = item[action]
+    except KeyError:
+        _task_finish(key, False, f"{action} tidak ada untuk {item.get('id', '?')}")
+        return
+    _run_stream(cmd, key)
+    with _TASKS_LOCK:
+        ok = _TASKS.get(key, {}).get("status") == "done"
+    if action == "install" and ok:
+        _log_install(item.get("id", "?"), "install", None)
+
+def start_task(item_id: str, action: str) -> dict:
+    """Mulai install/uninstall async. Return task key."""
+    item = _find(item_id)
+    if action == "install" and _detect(item["detect"]):
+        raise AppStoreError(f"{item['name']} sudah terinstall")
+    if action == "uninstall" and not _detect(item["detect"]):
+        raise AppStoreError(f"{item['name']} tidak terinstall")
+    key = f"{item_id}:{action}:{int(time.time())}"
+    t = threading.Thread(target=_stream_worker, args=(item, action, key), daemon=True)
+    t.start()
+    return {"ok": True, "id": item_id, "action": action, "key": key}
+
+def task_status(key: str) -> dict:
+    """Status task + output. Frontend polling."""
+    with _TASKS_LOCK:
+        t = _TASKS.get(key)
+        if t is None:
+            return {"status": "done", "lines": [], "error": "task not found", "done": True}
+        return dict(t)
+
+def task_list() -> list[dict]:
+    """Semua task (belum selesai saja)."""
+    with _TASKS_LOCK:
+        return [
+            {"key": k, "status": v["status"], "done": v["done"]}
+            for k, v in _TASKS.items() if not v["done"]
+        ]
 
 # id unik + command list-of-str + detect data-driven (bukan lambda) supaya
 # bisa diserialisasi ke JSON remote.
@@ -309,11 +400,12 @@ def service_status(item_id: str) -> str:
     return res.stdout.strip() or "unknown"
 
 
-def _log_install(item_id: str, action: str, res: subprocess.CompletedProcess) -> None:
+def _log_install(item_id: str, action: str, res: subprocess.CompletedProcess | None) -> None:
     """Catat ke log file (opsional)."""
     try:
         APPSTORE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        rc = res.returncode if res is not None else "?"
         with APPSTORE_LOG.open("a") as f:
-            f.write(f"[{action}] {item_id} rc={res.returncode}\n")
+            f.write(f"[{action}] {item_id} rc={rc}\n")
     except Exception:
         pass
