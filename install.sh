@@ -92,8 +92,9 @@ echo "==> Backend venv"
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-echo "==> Build frontend"
-cd dashboard && npm install && npm run build && cd ..
+##echo "==> Build frontend"
+##cd dashboard && npm install && npm run build && cd ..
+## Tidak perlu karena sudah build static
 
 echo "==> Folder website + trash"
 mkdir -p /www/wwwroot /www/trash
