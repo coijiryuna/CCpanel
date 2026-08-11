@@ -414,6 +414,49 @@ def install_extension(php_version: str, ext_name: str) -> None:
     # auto-enable after install
     enable_extension(php_version, ext_name)
 
+def install_extension_task(php_version: str, ext_name: str, key: str) -> None:
+    """Install PHP extension async: stream apt output ke task key."""
+    from . import tasks as tasks_ops
+    if php_version not in PHP_VERSIONS:
+        tasks_ops.finish(key, False, f"PHP version tidak valid: {php_version}")
+        return
+    pkg_map = {
+        "gd": f"{php_version}-gd",
+        "curl": f"{php_version}-curl",
+        "mbstring": f"{php_version}-mbstring",
+        "xml": f"{php_version}-xml",
+        "zip": f"{php_version}-zip",
+        "mysql": f"{php_version}-mysql",
+        "pgsql": f"{php_version}-pgsql",
+        "redis": f"{php_version}-redis",
+        "imagick": f"{php_version}-imagick",
+        "intl": f"{php_version}-intl",
+        "bcmath": f"{php_version}-bcmath",
+        "soap": f"{php_version}-soap",
+        "xdebug": f"{php_version}-xdebug",
+        "igbinary": f"{php_version}-igbinary",
+        "msgpack": f"{php_version}-msgpack",
+    }
+    pkg = pkg_map.get(ext_name.lower(), f"{php_version}-{ext_name}")
+    tasks_ops.run_stream(_sudo_cmd(["apt-get", "update", "-qq"]), key)
+    if tasks_ops.status(key)["status"] != "done":
+        return
+    tasks_ops.run_stream(_sudo_cmd(["apt-get", "install", "-y", pkg]), key)
+    if tasks_ops.status(key)["status"] != "done":
+        return
+    # auto-enable after install
+    try:
+        enable_extension(php_version, ext_name)
+        tasks_ops.append(key, f"Extension {ext_name} diaktifkan")
+    except PhpError as e:
+        tasks_ops.finish(key, False, str(e))
+
+def _sudo_cmd(cmd: list[str]) -> list[str]:
+    """Prefix sudo kalau bukan root & bukan mode demo/test."""
+    if os.geteuid() == 0 or str(PHP_FPM_DIR).startswith("/tmp/"):
+        return cmd
+    return ["sudo", "-n"] + cmd
+
 def set_pool_option(domain: str, php_version: str, key: str, value: str) -> None:
     """Set PHP-FPM pool option for a domain. Reloads FPM."""
     if php_version not in PHP_VERSIONS:

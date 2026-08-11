@@ -474,17 +474,23 @@ def disable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict
 
 @app.post("/api/sites/{site_id}/php-extensions/install")
 def install_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
-    """Install PHP extension via apt for site's PHP version."""
+    """Install PHP extension via apt untuk site's PHP version. Async + live output."""
+    import time as _t
     with get_db() as conn:
         row = check_site_access(conn, site_id, user)
         if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
             raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
-        try:
-            php_ops.install_extension(row["php_version"], req.extension)
-        except php_ops.PhpError as e:
-            raise HTTPException(500, str(e)) from e
+        key = f"php-ext:{row['php_version']}:{req.extension}:{int(_t.time())}"
+        from core import tasks as tasks_ops
+        tasks_ops.start(key, lambda: php_ops.install_extension_task(row["php_version"], req.extension, key))
         _log(conn, user, "site.php-ext-install", f"{row['domain']}: {req.extension}")
-    return {"ok": True, "extension": req.extension, "installed": True}
+    return {"ok": True, "extension": req.extension, "key": key}
+
+@app.get("/api/sites/php-extensions/tasks/{key}")
+def php_extension_task_status(key: str, _=Depends(require_auth)):
+    """Status + output task install PHP extension."""
+    from core import tasks as tasks_ops
+    return tasks_ops.status(key)
 
 
 # ------------------------------------------------------- domain tambahan

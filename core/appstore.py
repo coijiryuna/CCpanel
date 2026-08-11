@@ -22,10 +22,11 @@ import json
 import os
 import shutil
 import subprocess
-import threading
 import time
 import urllib.request
 from pathlib import Path
+
+from . import tasks as tasks_ops
 
 # env override utk testing (mirip pola core lain)
 APT = os.environ.get("CCPANEL_APT", "apt-get")
@@ -39,65 +40,18 @@ SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
 SERVICE_ACTIONS = {"start", "stop", "restart", "reload"}
 
 # ------------------------------------------------------------------ task async
-# Task install/uninstall jalan di background thread. Frontend polling status
-# + output per baris (tail). Status: running / done / error.
-_TASKS: dict[str, dict] = {}
-_TASKS_LOCK = threading.Lock()
-
-def _task(key: str) -> dict:
-    with _TASKS_LOCK:
-        t = _TASKS.setdefault(key, {"status": "running", "lines": [], "error": "", "done": False})
-    return t
-
-def _task_append(key: str, line: str) -> None:
-    with _TASKS_LOCK:
-        t = _TASKS.setdefault(key, {"status": "running", "lines": [], "error": "", "done": False})
-        t["lines"].append(line)
-        if len(t["lines"]) > 2000:
-            t["lines"] = t["lines"][-2000:]
-
-def _task_finish(key: str, ok: bool, error: str = "") -> None:
-    with _TASKS_LOCK:
-        t = _TASKS.setdefault(key, {"status": "running", "lines": [], "error": "", "done": False})
-        t["status"] = "done" if ok else "error"
-        t["error"] = error
-        t["done"] = True
-
-def _run_stream(cmd: list[str], key: str, timeout: int = 1800) -> None:
-    """Jalankan command, stream output baris per baris ke task key."""
-    _task_append(key, f"$ {' '.join(cmd)}")
-    try:
-        proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            bufsize=1,
-        )
-    except Exception as e:
-        _task_finish(key, False, str(e))
-        return
-    try:
-        assert proc.stdout is not None
-        for raw in proc.stdout:
-            line = raw.rstrip("\n")
-            if line:
-                _task_append(key, line)
-        rc = proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        _task_finish(key, False, f"Timeout ({timeout}s)")
-        return
-    _task_finish(key, rc == 0, "" if rc == 0 else f"exit code {rc}")
+# Task install/uninstall jalan di background thread (core/tasks). Frontend
+# polling status + output per baris. Status: running / done / error.
 
 def _stream_worker(item: dict, action: str, key: str) -> None:
     """Worker thread: jalankan install/uninstall item, stream ke task."""
     try:
         cmd = item[action]
     except KeyError:
-        _task_finish(key, False, f"{action} tidak ada untuk {item.get('id', '?')}")
+        tasks_ops.finish(key, False, f"{action} tidak ada untuk {item.get('id', '?')}")
         return
-    _run_stream(cmd, key)
-    with _TASKS_LOCK:
-        ok = _TASKS.get(key, {}).get("status") == "done"
-    if action == "install" and ok:
+    tasks_ops.run_stream(cmd, key)
+    if action == "install" and tasks_ops.status(key)["status"] == "done":
         _log_install(item.get("id", "?"), "install", None)
 
 def start_task(item_id: str, action: str) -> dict:
@@ -108,25 +62,16 @@ def start_task(item_id: str, action: str) -> dict:
     if action == "uninstall" and not _detect(item["detect"]):
         raise AppStoreError(f"{item['name']} tidak terinstall")
     key = f"{item_id}:{action}:{int(time.time())}"
-    t = threading.Thread(target=_stream_worker, args=(item, action, key), daemon=True)
-    t.start()
+    tasks_ops.start(key, lambda: _stream_worker(item, action, key))
     return {"ok": True, "id": item_id, "action": action, "key": key}
 
 def task_status(key: str) -> dict:
     """Status task + output. Frontend polling."""
-    with _TASKS_LOCK:
-        t = _TASKS.get(key)
-        if t is None:
-            return {"status": "done", "lines": [], "error": "task not found", "done": True}
-        return dict(t)
+    return tasks_ops.status(key)
 
 def task_list() -> list[dict]:
     """Semua task (belum selesai saja)."""
-    with _TASKS_LOCK:
-        return [
-            {"key": k, "status": v["status"], "done": v["done"]}
-            for k, v in _TASKS.items() if not v["done"]
-        ]
+    return tasks_ops.list_active()
 
 # id unik + command list-of-str + detect data-driven (bukan lambda) supaya
 # bisa diserialisasi ke JSON remote.
