@@ -101,6 +101,11 @@ echo "==> Folder website + trash + project"
 mkdir -p /www/wwwroot /www/trash /www/project
 
 echo "==> Systemd service + env"
+# Upgrade: pakai credential lama kalau ada (jangan generate ulang)
+if [ -f /etc/ccpanel.env ]; then
+  echo "==> /etc/ccpanel.env ditemukan — pertahankan credential lama"
+  set -a; . /etc/ccpanel.env; set +a
+fi
 # Secret otomatis kalau belum diset (mis. install ulang)
 if [ -z "${PANEL_PASSWORD:-}" ]; then PANEL_PASSWORD="$(openssl rand -base64 24)"; fi
 if [ -z "${PANEL_JWT_SECRET:-}" ]; then PANEL_JWT_SECRET="$(openssl rand -hex 32)"; fi
