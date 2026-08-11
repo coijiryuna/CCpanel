@@ -7,6 +7,7 @@ WWW_ROOT/TRASH_DIR + trash items di-share dari core/nginx.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -23,8 +24,28 @@ from .nginx import (
 
 APACHE_CONF_DIR = Path(os.environ.get("CCPANEL_APACHE_CONF_DIR", "/etc/apache2/sites-available"))
 SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
+# Port backend multi-web-server (aaPanel): apache = 8288. Single mode = 80.
+APACHE_PORT = int(os.environ.get("CCPANEL_APACHE_PORT", "8288"))
 
-VHOST_TEMPLATE = """<VirtualHost *:80>
+def _listen_port() -> int:
+    """Port listen vhost: 80 single mode, backend port multi mode."""
+    mode = os.environ.get("CCPANEL_WEBSERVER_MODE", "single").lower()
+    return APACHE_PORT if mode == "multi" else 80
+
+# ports.conf tempat Apache declare Listen (Debian/Ubuntu: /etc/apache2/ports.conf)
+APACHE_PORTS_CONF = Path(os.environ.get("CCPANEL_APACHE_PORTS_CONF", "/etc/apache2/ports.conf"))
+
+def _ensure_listen(port: int) -> None:
+    """Multi mode: pastikan ports.conf punya `Listen <port>` utk backend.
+    Tanpa ini `apachectl -t` error: Port <port> not defined."""
+    if port == 80 or not APACHE_PORTS_CONF.exists():
+        return
+    text = APACHE_PORTS_CONF.read_text()
+    if re.search(rf"^\s*Listen\s+{port}\s*$", text, re.M):
+        return
+    APACHE_PORTS_CONF.write_text(text.rstrip() + f"\nListen {port}\n")
+
+VHOST_TEMPLATE = """<VirtualHost *:{port}>
     ServerName {domain}
     DocumentRoot {root}
 
@@ -35,7 +56,6 @@ VHOST_TEMPLATE = """<VirtualHost *:80>
     </Directory>
 </VirtualHost>
 """
-
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
@@ -66,7 +86,8 @@ def nginx_reload() -> None:
 
 def _write_vhost(domain: str, root: Path) -> None:
     APACHE_CONF_DIR.mkdir(parents=True, exist_ok=True)
-    conf = VHOST_TEMPLATE.format(domain=domain, root=root)
+    _ensure_listen(_listen_port())
+    conf = VHOST_TEMPLATE.format(domain=domain, root=root, port=_listen_port())
     vhost_path(domain).write_text(conf)
 
 

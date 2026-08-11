@@ -23,8 +23,38 @@ ACTIVE = os.environ.get("CCPANEL_WEBSERVER", "nginx").lower()
 if ACTIVE not in ENGINES:
     ACTIVE = "nginx"
 
+# --- Mode multi-web-server (arsitektur aaPanel) ---
+# single: engine aktif pegang 80/443 sendiri.
+# multi : nginx front di 80/443, apache backend 8288, OpenLiteSpeed 8188.
+#         Site engine non-nginx dapat nginx vhost proxy -> port backend.
+MODES = ("single", "multi")
+BACKEND_PORTS = {
+    "apache": int(os.environ.get("CCPANEL_APACHE_PORT", "8288")),
+    "litespeed": int(os.environ.get("CCPANEL_LSWS_PORT", "8188")),
+}
+
 # alias error biar pengecualian lama (except nginx.NginxError) tetap jalan
 WebserverError = nginx.NginxError
+
+def mode() -> str:
+    """Mode aktif: single / multi (env override utk testing)."""
+    m = os.environ.get("CCPANEL_WEBSERVER_MODE", "single").lower()
+    return m if m in MODES else "single"
+
+def set_mode(m: str) -> None:
+    """Ganti mode runtime. Simpan ke env biar modul lain baca konsisten."""
+    m = (m or "").strip().lower()
+    if m not in MODES:
+        raise ValueError(f"Mode tidak valid: {m}. Pilihan: {', '.join(MODES)}")
+    os.environ["CCPANEL_WEBSERVER_MODE"] = m
+
+def is_multi() -> bool:
+    """True = multi-web-server: nginx front + backend engine port khusus."""
+    return mode() == "multi"
+
+def backend_port(engine: str) -> int:
+    """Port backend engine (multi mode). Single mode = 80 (tidak dipakai proxy)."""
+    return BACKEND_PORTS.get(engine.lower(), 80)
 
 
 def set_active(engine: str) -> None:
@@ -41,6 +71,17 @@ def for_engine(engine: str):
 
 def _engine():
     return ENGINES[ACTIVE]
+
+
+def front_proxy_enable(domain: str, port: int) -> None:
+    """Multi mode: nginx vhost front (80) proxy -> 127.0.0.1:port backend.
+    Dipanggil utk site yang dilayani engine backend (apache/litespeed)."""
+    return nginx.front_proxy_enable(domain, port)
+
+
+def front_proxy_disable(domain: str) -> None:
+    """Multi mode: balik nginx vhost front ke static (site dilayani nginx)."""
+    return nginx.front_proxy_disable(domain)
 
 
 def create_site(domain: str):

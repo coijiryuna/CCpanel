@@ -23,6 +23,15 @@ from .nginx import (
 
 LSWS_CONF_DIR = Path(os.environ.get("CCPANEL_LSWS_CONF_DIR", "/usr/local/lsws/conf/vhosts"))
 LSWS_BIN = os.environ.get("CCPANEL_LSWS_BIN", "/usr/local/lsws/bin/lshttpd")
+# Port backend multi-web-server (aaPanel): OpenLiteSpeed = 8188. Single = 80.
+# Catatan: listener OLS dikonfig di httpd_config.conf (level server), bukan
+# per-vhost. Nilai ini utk dokumentasi + validasi nginx front proxy.
+LSWS_PORT = int(os.environ.get("CCPANEL_LSWS_PORT", "8188"))
+
+def _listen_port() -> int:
+    """Port listen vhost: 80 single mode, backend port multi mode."""
+    mode = os.environ.get("CCPANEL_WEBSERVER_MODE", "single").lower()
+    return LSWS_PORT if mode == "multi" else 80
 
 VHOST_TEMPLATE = """docroot                   {root}/
 vhDomain                  {domain}

@@ -18,7 +18,7 @@ qemu-system-x86_64 -enable-kvm -m 2G -smp 2 \
 -net nic,model=virtio \
 -net user,hostfwd=tcp::8888-:8888,hostfwd=tcp::2222-:22
 
-ssh user-vm@localhost -p 2222
+ssh debianserver@localhost -p 2222
 
 
 ==================================================

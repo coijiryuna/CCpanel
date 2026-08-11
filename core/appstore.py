@@ -347,9 +347,12 @@ def service_action(item_id: str, action: str) -> dict:
         raise AppStoreError(f"{item['name']} tidak punya service systemd")
     if not _detect(item["detect"]):
         raise AppStoreError(f"{item['name']} tidak terinstall")
-    # Web server: satu port 80 hanya satu engine. Start nginx/apache/lsws
-    # harus stop engine lain dulu, kalau tidak bind port gagal.
-    if action == "start" and unit in ("nginx", "apache2", "lsws"):
+    # Web server: single mode — satu port 80 hanya satu engine. Start
+    # nginx/apache/lsws harus stop engine lain dulu, kalau tidak bind port gagal.
+    # Multi mode (nginx front 80 + backend 8288/8188): engine bisa jalan
+    # barengan, JANGAN stop yang lain.
+    from . import webserver as webserver_ops
+    if action == "start" and unit in ("nginx", "apache2", "lsws") and not webserver_ops.is_multi():
         for other in ("nginx", "apache2", "lsws"):
             if other == unit:
                 continue

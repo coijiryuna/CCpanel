@@ -96,6 +96,10 @@ def delete_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
         eng = webserver_ops.for_engine(row["webserver"])
         try:
             eng.remove_site(row["domain"])
+            # multi mode: hapus juga nginx front proxy (site backend punya
+            # vhost nginx di 80 yang proxy ke port backend)
+            if webserver_ops.is_multi() and row["webserver"] != "nginx":
+                webserver_ops.for_engine("nginx").remove_vhost(row["domain"])
             # hapus pool php-fpm + block fastcgi kalau site pakai PHP
             if row["php_version"] != "static":
                 php_ops.remove_pool(row["domain"], row["php_version"])
@@ -155,6 +159,20 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
             root = eng.create_site(domain)
         except webserver_ops.WebserverError as e:
             raise HTTPException(500, str(e)) from e
+
+        # multi mode: site engine backend (apache/litespeed) butuh nginx front
+        # proxy di 80 -> port backend. Rollback front proxy kalau gagal.
+        front_done = False
+        if webserver_ops.is_multi() and engine != "nginx":
+            try:
+                webserver_ops.front_proxy_enable(domain, webserver_ops.backend_port(engine))
+                front_done = True
+            except webserver_ops.WebserverError as e:
+                try:
+                    eng.remove_vhost(domain)
+                except Exception:
+                    pass
+                raise HTTPException(500, f"Gagal pasang front proxy: {e}") from e
 
         # FTP + DB harus dibuat SEBELUM insert site (butuh site_id utk FK)
         site_id = None
@@ -240,6 +258,11 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
                 eng.remove_site(domain)
             except Exception:
                 pass
+            if front_done:
+                try:
+                    webserver_ops.for_engine("nginx").remove_vhost(domain)
+                except Exception:
+                    pass
             if isinstance(e, HTTPException):
                 raise
             raise HTTPException(500, str(e)) from e

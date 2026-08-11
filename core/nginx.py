@@ -300,6 +300,65 @@ def proxy_disable(domain: str) -> None:
         raise
     nginx_reload()
 
+# -------------------------------------------- front proxy multi-web-server
+# Arsitektur aaPanel: nginx front pegang 80/443, apache/OpenLiteSpeed backend
+# di port khusus (8288/8188). Site backend dapat nginx vhost di 80 yang
+# proxy_pass ke 127.0.0.1:<port-backend>. listen SELALU 80 (front).
+
+def _front_proxy_conf(domain: str, port: int) -> str:
+    return (
+        "server {\n"
+        f"    listen 80;\n"
+        f"    server_name {domain};\n"
+        "\n"
+        f"    location / {{\n"
+        f"        proxy_pass http://127.0.0.1:{port};\n"
+        "        proxy_set_header Host $host;\n"
+        "        proxy_set_header X-Real-IP $remote_addr;\n"
+        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "        proxy_set_header X-Forwarded-Proto $scheme;\n"
+        "    }\n"
+        "}\n"
+    )
+
+def front_proxy_enable(domain: str, port: int) -> None:
+    """Multi mode: tulis/replace nginx vhost front proxy -> backend port.
+    Vhost lama (static/proxy) ditimpa. nginx -t dulu; rollback backup kalau gagal."""
+    if not validate.valid_domain(domain):
+        raise NginxError(f"Domain tidak valid: {domain}")
+    vh = vhost_path(domain)
+    NGINX_CONF_DIR.mkdir(parents=True, exist_ok=True)
+    backup = vh.read_text() if vh.exists() else None
+    vh.write_text(_front_proxy_conf(domain, port))
+    try:
+        nginx_test()
+    except NginxError:
+        if backup is not None:
+            vh.write_text(backup)
+        else:
+            vh.unlink(missing_ok=True)
+        raise
+    nginx_reload()
+
+def front_proxy_disable(domain: str) -> None:
+    """Multi mode: balik nginx vhost front ke static (site dilayani nginx)."""
+    vh = vhost_path(domain)
+    if not vh.exists():
+        raise NginxError(f"vhost {vh} tidak ada")
+    conf = vh.read_text()
+    backup = conf
+    try:
+        conf = _set_root_location(conf, 0, proxy=False)
+    except NginxError:
+        raise
+    vh.write_text(conf)
+    try:
+        nginx_test()
+    except NginxError:
+        vh.write_text(backup)
+        raise
+    nginx_reload()
+
 # --------------------------------------------- vhost project standalone (domain)
 
 def project_vhost_path(domain: str) -> Path:

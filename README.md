@@ -7,6 +7,7 @@ Hosting control panel ala cPanel/aaPanel untuk VPS Ubuntu/Debian. Kelola website
 ## Fitur v1
 
 - CRUD website: buat/hapus site (folder + nginx vhost), enable/disable
+- Multi web server (arsitektur aaPanel): mode **single** (satu engine pegang 80/443) atau **multi** — nginx front di 80/443, Apache backend **8288**, OpenLiteSpeed backend **8188**. Engine jalan barengan; site engine backend otomatis dapat nginx vhost proxy → port backend. Ganti mode di Settings → Arsitektur Web Server
 - Tabs proyek ala aaPanel (Static/PHP/Node/Python/Go/Docker): list site difilter per tab, buat site pilih tipe proyek
 - Multi-domain per site: pasang/lepas domain alias (update `server_name` vhost otomatis, rollback kalau gagal)
 - Proxy project: site bisa punya port + mode proxy penuh — nginx listen di port itu dan forward `location /` ke app di `127.0.0.1:<port>`. Cocok untuk Node.js/Python/Go/Docker app (runner via App Manager, subpath juga didukung)
@@ -92,6 +93,9 @@ mkdir -p /www/wwwroot /www/trash
 | `CCPANEL_PHP_FPM_DIR` | opsional | default `/etc/php` (pool php-fpm per versi) |
 | `CCPANEL_WWW_ROOT` | opsional | default `/www/wwwroot` |
 | `CCPANEL_TRASH_DIR` | opsional | default `/www/trash` |
+| `CCPANEL_WEBSERVER_MODE` | opsional | `single` / `multi` (override mode, default dari DB settings) |
+| `CCPANEL_APACHE_PORT` | opsional | port backend Apache di mode multi (default `8288`) |
+| `CCPANEL_LSWS_PORT` | opsional | port backend OpenLiteSpeed di mode multi (default `8188`) |
 
 ## Run
 

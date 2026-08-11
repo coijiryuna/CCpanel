@@ -150,6 +150,7 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
         old_content = old_vhost.read_text() if old_vhost.exists() else ""
         php_version = row["php_version"]
         root = Path(row["root_path"])
+        multi = webserver_ops.is_multi()
         # validasi SEBELUM hapus apa pun — kalau root hilang, jangan sentuh vhost lama
         if not root.is_dir():
             raise HTTPException(400, f"Folder root tidak ada: {root}")
@@ -157,9 +158,26 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
         try:
             # 1. hapus vhost lama (root tetap)
             old_eng.remove_vhost(domain)
-            # 2. buat vhost baru pakai folder root yang sama
-            new_eng.activate_site(domain)
-            new_vhost = new_eng.vhost_path(domain)
+            # 2. buat vhost baru pakai folder root yang sama.
+            #    multi mode: nginx front = proxy/static vhost di 80, backend
+            #    engine = vhost di port backend. Switch engine backend punya
+            #    nginx front yang harus dibalik/repasang.
+            if multi:
+                if engine == "nginx":
+                    # backend -> nginx: hapus vhost backend, balik front ke static
+                    webserver_ops.front_proxy_disable(domain)
+                    new_vhost = webserver_ops.for_engine("nginx").vhost_path(domain)
+                else:
+                    # nginx -> backend / backend -> backend lain:
+                    # front proxy sudah ada (static/proxy), replace ke port backend baru
+                    if old_engine != "nginx":
+                        webserver_ops.for_engine("nginx").remove_vhost(domain)
+                    new_eng.activate_site(domain)
+                    webserver_ops.front_proxy_enable(domain, webserver_ops.backend_port(engine))
+                    new_vhost = new_eng.vhost_path(domain)
+            else:
+                new_eng.activate_site(domain)
+                new_vhost = new_eng.vhost_path(domain)
             # 3. migrasi PHP block
             if php_version != "static":
                 php_ops.insert_php_block(domain, php_version, new_vhost, engine)
@@ -174,6 +192,14 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
                 old_eng.activate_site(domain)
             except Exception:
                 pass
+            if multi:
+                try:
+                    if old_engine == "nginx":
+                        webserver_ops.front_proxy_disable(domain)
+                    else:
+                        webserver_ops.front_proxy_enable(domain, webserver_ops.backend_port(old_engine))
+                except Exception:
+                    pass
             raise HTTPException(500, f"Gagal pindah engine: {e}") from e
         _log(conn, user, "site.engine", f"{domain}: {old_engine} -> {engine}")
     return {"ok": True, "engine": engine}

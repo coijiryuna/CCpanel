@@ -30,6 +30,13 @@ if not os.environ.get("CCPANEL_WEBSERVER"):
     if row:
         webserver_ops.set_active(row["value"])
 
+# mode web server (single/multi): env override (testing), kalau tidak dari DB
+if not os.environ.get("CCPANEL_WEBSERVER_MODE"):
+    with deps.get_db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'webserver_mode'").fetchone()
+    if row and row["value"] in webserver_ops.MODES:
+        webserver_ops.set_mode(row["value"])
+
 # engine database aktif: env override (testing), kalau tidak dari DB settings
 if not os.environ.get("CCPANEL_DATABASE"):
     with deps.get_db() as conn:

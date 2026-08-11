@@ -41,6 +41,38 @@ def set_webserver_settings(req: WebserverSettings, user: dict = Depends(require_
     webserver_ops.set_active(engine)
     return {"ok": True, "engine": engine}
 
+class WebserverMode(BaseModel):
+    mode: str
+
+@app.get("/api/settings/webserver-mode")
+def get_webserver_mode(user: dict = Depends(require_admin)) -> dict:
+    with get_db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'webserver_mode'").fetchone()
+    mode = row["value"] if row else webserver_ops.mode()
+    return {"mode": mode if mode in webserver_ops.MODES else "single"}
+
+@app.post("/api/settings/webserver-mode")
+def set_webserver_mode(req: WebserverMode, user: dict = Depends(require_admin)) -> dict:
+    """Ganti mode arsitektur web server: single / multi.
+
+    single — engine aktif pegang 80/443 sendiri.
+    multi  — nginx front di 80/443, apache backend 8288, OpenLiteSpeed 8188.
+    Site yang sudah ada TIDAK diubah otomatis; mode berlaku utk vhost baru /
+    switch engine berikutnya.
+    """
+    mode = (req.mode or "").strip().lower()
+    if mode not in webserver_ops.MODES:
+        raise HTTPException(400, f"Mode tidak dikenal. Pilihan: {', '.join(webserver_ops.MODES)}")
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('webserver_mode', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (mode,),
+        )
+        _log(conn, user, "settings.webserver-mode", mode)
+    webserver_ops.set_mode(mode)
+    return {"ok": True, "mode": mode}
+
 class DatabaseSettings(BaseModel):
     engine: str
 
