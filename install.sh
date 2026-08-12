@@ -3,7 +3,62 @@
 # Jalankan sebagai root: sudo bash install.sh
 # Bisa juga langsung via curl (auto-clone kalau source tak ada):
 #   curl -fsSL https://raw.githubusercontent.com/coijiryuna/CCpanel/main/install.sh | sudo bash
+# Options:
+#   --fresh    Uninstall all CCPanel packages first (nginx, apache2, openlitespeed, mariadb, php*, certbot, etc.)
+#   --help     Show this help
 set -euo pipefail
+
+# --- Parse arguments ---
+FRESH_INSTALL=false
+for arg in "$@"; do
+  case "$arg" in
+    --fresh) FRESH_INSTALL=true ;;
+    --help)
+      echo "Usage: $0 [--fresh] [--help]"
+      echo "  --fresh   Uninstall all CCPanel packages before installing"
+      echo "  --help    Show this help"
+      exit 0
+      ;;
+    *) echo "Unknown option: $arg"; exit 1 ;;
+  esac
+done
+
+# --- Fresh install: uninstall all CCPanel packages first ---
+if [ "$FRESH_INSTALL" = true ]; then
+  echo "==> FRESH INSTALL: Uninstalling all CCPanel packages..."
+  # Stop services first
+  systemctl stop ccpanel 2>/dev/null || true
+  systemctl stop nginx 2>/dev/null || true
+  systemctl stop apache2 2>/dev/null || true
+  systemctl stop lsws 2>/dev/null || true
+  systemctl stop mariadb 2>/dev/null || true
+  systemctl stop mysql 2>/dev/null || true
+  systemctl stop php8.1-fpm 2>/dev/null || true
+  systemctl stop php8.2-fpm 2>/dev/null || true
+  systemctl stop php8.3-fpm 2>/dev/null || true
+  systemctl stop php8.4-fpm 2>/dev/null || true
+  
+  # Remove packages
+  apt remove -y nginx nginx-common nginx-core 2>/dev/null || true
+  apt remove -y apache2 apache2-bin apache2-data apache2-utils 2>/dev/null || true
+  apt remove -y openlitespeed lsphp* 2>/dev/null || true
+  apt remove -y mariadb-server mariadb-client mariadb-common 2>/dev/null || true
+  apt remove -y mysql-server mysql-client mysql-common 2>/dev/null || true
+  apt remove -y php8.1-fpm php8.2-fpm php8.3-fpm php8.4-fpm 2>/dev/null || true
+  apt remove -y php8.1-cli php8.2-cli php8.3-cli php8.4-cli 2>/dev/null || true
+  apt remove -y php8.1-common php8.2-common php8.3-common php8.4-common 2>/dev/null || true
+  apt remove -y certbot python3-certbot-nginx 2>/dev/null || true
+  apt autoremove -y 2>/dev/null || true
+  apt autoclean 2>/dev/null || true
+  
+  # Remove config directories
+  rm -rf /etc/nginx /etc/apache2 /usr/local/lsws /etc/mysql /etc/php 2>/dev/null || true
+  rm -rf /www/wwwroot /www/trash /www/project /www/wwwlogs /www/server 2>/dev/null || true
+  rm -f /etc/ccpanel.env 2>/dev/null || true
+  systemctl daemon-reload
+  
+  echo "==> Fresh uninstall complete"
+fi
 
 # --- Self-bootstrap: kalau dijalankan via curl, source tak ada → clone dulu ---
 if [ ! -f "$(dirname "$0")/server.py" ]; then
