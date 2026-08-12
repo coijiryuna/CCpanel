@@ -20,17 +20,54 @@ SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
 
 VHOST_TEMPLATE = """server {{
     listen 80;
+    listen [::]:80;
+
     server_name {server_name};
+
+    index index.php index.html index.htm default.php default.htm default.html;
+
     root {root};
 
-    index index.html index.htm;
+    #Subdirectory-configuration-start
+    include /www/server/panel/vhost/nginx/sub_dir/{domain}/*.conf;
+    #Subdirectory-configuration-end
 
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript;
+    include /www/server/panel/vhost/nginx/extension/{domain}/*.conf;
 
-    location / {{
-        try_files $uri $uri/ =404;
+    #SSL-START SSL related configuration, do NOT delete or modify the next line of commented-out 404 rules
+    #error_page 404/404.html;
+    #SSL-END
+
+    #ERROR-PAGE-START  Error page configuration, allowed to be commented, deleted or modified
+    error_page 404 /404.html;
+    error_page 502 /502.html;
+    #ERROR-PAGE-END
+
+    #PHP-INFO-START PHP reference configuration, allowed to be commented, deleted or modified
+    include enable-php-00.conf;
+    #PHP-INFO-END
+
+    #REWRITE-START URL rewrite rule reference, any modification will invalidate the rewrite rules set by the panel
+    include /www/server/panel/vhost/rewrite/{domain}.conf;
+    #REWRITE-END
+
+    # Forbidden files or directories
+    location ~ ^/(\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md) {{
+        return 404;
     }}
+
+    # Directory verification related settings for one-click application for SSL certificate
+    location ~ \\.well-known {{
+        allow all;
+    }}
+
+    # Prohibit putting sensitive files in certificate verification directory
+    if ( $uri ~ "^/\\.well-known/.*\\.(php|jsp|py|js|css|lua|ts|go|zip|tar\\.gz|rar|7z|sql|bak)$" ) {{
+        return 403;
+    }}
+
+    access_log /www/wwwlogs/{domain}.log;
+    error_log  /www/wwwlogs/{domain}.error.log;
 }}
 """
 
@@ -75,18 +112,21 @@ def nginx_reload() -> None:
 
 
 def _write_vhost(domain: str, root: Path, server_names: list[str] | None = None,
-                 port: int = 0) -> None:
+                 port: int = 0, running_dir: str = "") -> None:
     """Tulis vhost. server_names: list domain (utama + tambahan), default [domain].
     port > 0: server listen di port itu (bukan 80) — dipakai proxy project
     (app jalan di localhost:<port>, nginx forward dari port itu).
+    running_dir: subdirectory untuk document root (e.g., public, public_html, ThinkPHP5, Laravel, Codeigniter)
     """
     NGINX_CONF_DIR.mkdir(parents=True, exist_ok=True)
     names = [d for d in (server_names or [domain]) if d]
     if domain not in names:
         names.insert(0, domain)
-    listen = f"listen {port};" if port else "listen 80;"
-    conf = VHOST_TEMPLATE.format(server_name=" ".join(names), root=root)
-    conf = conf.replace("listen 80;", listen, 1)
+    listen = f"listen {port};\n    listen [::]:{port};" if port else "listen 80;\n    listen [::]:80;"
+    # Use running_dir if provided, otherwise use root
+    doc_root = str(root / running_dir) if running_dir else str(root)
+    conf = VHOST_TEMPLATE.format(server_name=" ".join(names), root=doc_root, domain=domain)
+    conf = conf.replace("listen 80;\n    listen [::]:80;", listen, 1)
     vhost_path(domain).write_text(conf)
 
 
@@ -119,18 +159,19 @@ def create_site(domain: str) -> Path:
     return root
 
 
-def activate_site(domain: str) -> None:
+def activate_site(domain: str, running_dir: str = "") -> None:
     """Tulis vhost untuk folder root yang SUDAH ADA (restore backup).
 
     Tidak membuat folder, tidak menyentuh isinya. nginx -t dulu, rollback
     hapus vhost kalau gagal.
+    running_dir: subdirectory untuk document root (e.g., public, public_html, ThinkPHP5, Laravel, Codeigniter)
     """
     root = root_path(domain)
     if not root.is_dir():
         raise NginxError(f"Folder root tidak ada: {root}")
     if vhost_path(domain).exists():
         raise NginxError(f"vhost {vhost_path(domain)} sudah ada")
-    _write_vhost(domain, root)
+    _write_vhost(domain, root, running_dir=running_dir)
     try:
         nginx_test()
     except NginxError:
@@ -313,17 +354,40 @@ _SSL_DIRECTIVE_RE = re.compile(
 )
 
 def _front_proxy_conf(domain: str, port: int, ssl: str = "") -> str:
-    """conf front proxy. `ssl` = direktif SSL dari vhost lama (preserve
+    """conf front proxy (aaPanel style). `ssl` = direktif SSL dari vhost lama (preserve
     supaya TLS termination tetap jalan saat vhost front ditimpa ulang)."""
     return (
         "server {\n"
         "    listen 80;\n"
+        "    listen [::]:80;\n"
         f"{ssl}"
         f"    server_name {domain};\n"
         "\n"
-        "    # akses + error log (sama aaPanel)\n"
-        f"    access_log /www/wwwlogs/{domain}.log;\n"
-        f"    error_log  /www/wwwlogs/{domain}.error.log;\n"
+        "    index index.php index.html index.htm default.php default.htm default.html;\n"
+        f"    root /www/wwwroot/{domain}/;\n"
+        "\n"
+        "    #Subdirectory-configuration-start\n"
+        f"    #include /www/server/panel/vhost/nginx/sub_dir/{domain}/*.conf;\n"
+        "    #Subdirectory-configuration-end\n"
+        "\n"
+        f"    include /www/server/panel/vhost/nginx/extension/{domain}/*.conf;\n"
+        "\n"
+        "    #PHP-INFO-START  PHP reference configuration, allowed to be commented, deleted or modified\n"
+        "    #include enable-php-00.conf;\n"
+        "    #PHP-INFO-END\n"
+        "\n"
+        "    #SSL-START SSL related configuration, do NOT delete or modify the next line of commented-out 404 rules\n"
+        "    #error_page 404/404.html;\n"
+        "    #SSL-END\n"
+        "\n"
+        "    #REWRITE-START URL rewrite rule reference, any modification will invalidate the rewrite rules set by the panel\n"
+        f"    # include /www/server/panel/vhost/rewrite/{domain}.conf;\n"
+        "    #REWRITE-END\n"
+        "\n"
+        "    #ERROR-PAGE-START  Error page configuration, allowed to be commented, deleted or modified\n"
+        "    #error_page 404 /404.html;\n"
+        "    #error_page 502 /502.html;\n"
+        "    #ERROR-PAGE-END\n"
         "\n"
         f"    location / {{\n"
         f"        proxy_pass http://127.0.0.1:{port};\n"
@@ -342,21 +406,25 @@ def _front_proxy_conf(domain: str, port: int, ssl: str = "") -> str:
         "        add_header Cache-Control no-cache;\n"
         "    }\n"
         "\n"
-        "    # file sensitif dilarang\n"
+        "    # Forbidden files or directories\n"
         "    location ~ ^/(\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md) {\n"
         "        return 404;\n"
         "    }\n"
         "\n"
-        "    # verifikasi sertifikat (certbot)\n"
         "    location ~ \\.well-known {\n"
         "        allow all;\n"
+        f"        root /www/wwwroot/{domain}/;\n"
         "        try_files $uri =404;\n"
         "    }\n"
         "\n"
-        "    # larang file eksekusi di direktori verifikasi sertifikat\n"
+        "    # Prohibit putting sensitive files in certificate verification directory\n"
         "    if ( $uri ~ \"^/\\.well-known/.*\\.(php|jsp|py|js|css|lua|ts|go|zip|tar\\.gz|rar|7z|sql|bak)$\" ) {\n"
         "        return 403;\n"
         "    }\n"
+        "\n"
+        f"    access_log /www/wwwlogs/{domain}.log;\n"
+        f"    error_log  /www/wwwlogs/{domain}.error.log;\n"
+        "\n"
         "}\n"
     )
 

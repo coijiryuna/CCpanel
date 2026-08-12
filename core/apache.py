@@ -47,18 +47,25 @@ def _ensure_listen(port: int) -> None:
 
 VHOST_TEMPLATE = """<VirtualHost *:{port}>
     ServerAdmin webmaster@{domain}
-    ServerName {domain}
     DocumentRoot "{root}"
+    ServerName {domain}
+    ServerAlias {domain}
     #errorDocument 404 /404.html
+    IncludeOptional /www/server/panel/vhost/apache/extension/{domain}/*.conf
     ErrorLog "/www/wwwlogs/{domain}-error_log"
     CustomLog "/www/wwwlogs/{domain}-access_log" combined
 
     #DENY FILES
-    <Files ~ (\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md)$>
-        Order allow,deny
-        Deny from all
+     <Files ~ (\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md)$>
+       Order allow,deny
+       Deny from all
     </Files>
-
+    
+    #PHP
+    <FilesMatch \\.php$>
+            SetHandler "proxy:unix:/tmp/php-cgi-00.sock|fcgi://localhost"
+    </FilesMatch>
+    
     #PATH
     <Directory "{root}">
         SetOutputFilter DEFLATE
@@ -68,7 +75,7 @@ VHOST_TEMPLATE = """<VirtualHost *:{port}>
         DirectoryIndex index.php index.html index.htm default.php default.html default.htm
     </Directory>
 
-    #Obtain the reverse proxy ip start
+    #Obtain the reverse proxy ip start   
     RemoteIPTrustedProxy 127.0.0.1
     RemoteIPHeader X-Real-IP
     #Obtain the reverse proxy ip end
@@ -102,14 +109,15 @@ def nginx_reload() -> None:
         raise WebserverError(res.stderr.strip() or "systemctl reload apache2 failed")
 
 
-def _write_vhost(domain: str, root: Path) -> None:
+def _write_vhost(domain: str, root: Path, running_dir: str = "") -> None:
     APACHE_CONF_DIR.mkdir(parents=True, exist_ok=True)
     _ensure_listen(_listen_port())
-    conf = VHOST_TEMPLATE.format(domain=domain, root=root, port=_listen_port())
+    doc_root = str(root / running_dir) if running_dir else str(root)
+    conf = VHOST_TEMPLATE.format(domain=domain, root=doc_root, port=_listen_port())
     vhost_path(domain).write_text(conf)
 
 def _write_vhost_with_features(domain: str, root: Path, features: dict) -> None:
-    """Write vhost with custom feature flags (for config modal updates)."""
+    """Write vhost with custom feature flags (for config modal updates) - aaPanel style."""
     APACHE_CONF_DIR.mkdir(parents=True, exist_ok=True)
     _ensure_listen(_listen_port())
     
@@ -121,20 +129,20 @@ def _write_vhost_with_features(domain: str, root: Path, features: dict) -> None:
     server_admin = features.get("server_admin", f"webmaster@{domain}")
     error_log_path = features.get("error_log_path", "/www/wwwlogs/")
     custom_log_path = features.get("custom_log_path", "/www/wwwlogs/")
+    running_dir = features.get("running_dir", "")
     
     deny_block = ""
     if deny_files:
         deny_block = """    #DENY FILES
-    <Files ~ (\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md)$>
-        Order allow,deny
-        Deny from all
+     <Files ~ (\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md)$>
+       Order allow,deny
+       Deny from all
     </Files>
-
 """
     
     remote_ip_block = ""
     if remote_ip:
-        remote_ip_block = """    #Obtain the reverse proxy ip start
+        remote_ip_block = """    #Obtain the reverse proxy ip start   
     RemoteIPTrustedProxy 127.0.0.1
     RemoteIPHeader X-Real-IP
     #Obtain the reverse proxy ip end
@@ -142,16 +150,25 @@ def _write_vhost_with_features(domain: str, root: Path, features: dict) -> None:
     
     deflate_line = "        SetOutputFilter DEFLATE\n" if deflate else ""
     
+    doc_root = str(root / running_dir) if running_dir else str(root)
+    
     conf = f"""<VirtualHost *:{_listen_port()}>
     ServerAdmin {server_admin}
+    DocumentRoot "{doc_root}"
     ServerName {domain}
-    DocumentRoot "{root}"
+    ServerAlias {domain}
     #errorDocument 404 /404.html
+    IncludeOptional /www/server/panel/vhost/apache/extension/{domain}/*.conf
     ErrorLog "{error_log_path}{domain}-error_log"
     CustomLog "{custom_log_path}{domain}-access_log" combined
 
-{deny_block}    #PATH
-    <Directory "{root}">
+{deny_block}    #PHP
+    <FilesMatch \\.php$>
+            SetHandler "proxy:unix:/tmp/php-cgi-00.sock|fcgi://localhost"
+    </FilesMatch>
+    
+    #PATH
+    <Directory "{doc_root}">
 {deflate_line}        Options FollowSymLinks
         AllowOverride All
         Require all granted
@@ -163,7 +180,7 @@ def _write_vhost_with_features(domain: str, root: Path, features: dict) -> None:
     vhost_path(domain).write_text(conf)
 
 
-def create_site(domain: str) -> Path:
+def create_site(domain: str, running_dir: str = "") -> Path:
     root = root_path(domain)
     if root.exists():
         raise WebserverError(f"Folder root sudah ada: {root}")
@@ -173,7 +190,7 @@ def create_site(domain: str) -> Path:
         raise WebserverError(f"Folder root sudah ada: {root}") from None
     try:
         (root / "index.html").write_text(DEFAULT_INDEX.format(domain=domain))
-        _write_vhost(domain, root)
+        _write_vhost(domain, root, running_dir)
         nginx_test()
     except Exception as e:
         vhost_path(domain).unlink(missing_ok=True)
@@ -185,13 +202,13 @@ def create_site(domain: str) -> Path:
     return root
 
 
-def activate_site(domain: str) -> None:
+def activate_site(domain: str, running_dir: str = "") -> None:
     root = root_path(domain)
     if not root.is_dir():
         raise WebserverError(f"Folder root tidak ada: {root}")
     if vhost_path(domain).exists():
         raise WebserverError(f"vhost {vhost_path(domain)} sudah ada")
-    _write_vhost(domain, root)
+    _write_vhost(domain, root, running_dir)
     try:
         nginx_test()
     except WebserverError:

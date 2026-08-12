@@ -84,12 +84,12 @@ def front_proxy_disable(domain: str) -> None:
     return nginx.front_proxy_disable(domain)
 
 
-def create_site(domain: str):
-    return _engine().create_site(domain)
+def create_site(domain: str, running_dir: str = ""):
+    return _engine().create_site(domain, running_dir)
 
 
-def activate_site(domain: str) -> None:
-    return _engine().activate_site(domain)
+def activate_site(domain: str, running_dir: str = "") -> None:
+    return _engine().activate_site(domain, running_dir)
 
 
 def set_enabled(domain: str, enabled: bool) -> None:

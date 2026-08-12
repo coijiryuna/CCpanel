@@ -86,6 +86,9 @@ def get_site_config(site_id: int, user: dict = Depends(require_auth)) -> dict:
         "rewrite_rules": feats["rewrite_rules"],
         "xss_enabled": feats["xss_enabled"],
         "accesslog_enabled": feats["accesslog_enabled"],
+        # Site directory & running directory
+        "site_dir": row["site_dir"] if "site_dir" in row.keys() else "",
+        "running_dir": row["running_dir"] if "running_dir" in row.keys() else "",
         # Apache/OLS features
         "deny_files_enabled": backend_feats.get("deny_files_enabled", True),
         "remote_ip_enabled": backend_feats.get("remote_ip_enabled", True),
@@ -162,7 +165,16 @@ async def put_site_config(site_id: int, req: Request, user: dict = Depends(requi
             if engine in ("apache", "litespeed"):
                 _apply_backend_features(domain, engine, vh, body)
             
-            # 5. Test both configs
+            # 5. Update site_dir and running_dir in database
+            if "site_dir" in body or "running_dir" in body:
+                site_dir = body.get("site_dir", row["site_dir"] if "site_dir" in row.keys() else "")
+                running_dir = body.get("running_dir", row["running_dir"] if "running_dir" in row.keys() else "")
+                conn.execute(
+                    "UPDATE sites SET site_dir = ?, running_dir = ? WHERE id = ?",
+                    (site_dir, running_dir, site_id)
+                )
+            
+            # 6. Test both configs
             eng.nginx_test()
             if multi and engine in ("apache", "litespeed") and nginx_vh and nginx_vh.exists():
                 webserver_ops.nginx.nginx_test()
@@ -208,6 +220,7 @@ def _apply_backend_features(domain: str, engine: str, vh: Path, body: dict) -> N
     server_admin = body.get("server_admin", f"webmaster@{domain}")
     error_log_path = body.get("error_log_path", "/www/wwwlogs/")
     custom_log_path = body.get("custom_log_path", "/www/wwwlogs/")
+    running_dir = body.get("running_dir", "")
     
     if engine == "apache":
         # Regenerate apache vhost with features
@@ -220,6 +233,7 @@ def _apply_backend_features(domain: str, engine: str, vh: Path, body: dict) -> N
             "server_admin": server_admin,
             "error_log_path": error_log_path,
             "custom_log_path": custom_log_path,
+            "running_dir": running_dir,
         })
     elif engine == "litespeed":
         # Regenerate OLS vhost with features
@@ -232,6 +246,7 @@ def _apply_backend_features(domain: str, engine: str, vh: Path, body: dict) -> N
             "server_admin": server_admin,
             "error_log_path": error_log_path,
             "custom_log_path": custom_log_path,
+            "running_dir": running_dir,
         })
 
 
@@ -268,6 +283,7 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
         old_content = old_vhost.read_text() if old_vhost.exists() else ""
         php_version = row["php_version"]
         root = Path(row["root_path"])
+        running_dir = row["running_dir"] if "running_dir" in row.keys() else ""
         multi = webserver_ops.is_multi()
         # validasi SEBELUM hapus apa pun — kalau root hilang, jangan sentuh vhost lama
         if not root.is_dir():
@@ -292,11 +308,11 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
                     # nginx -> backend / backend -> backend lain:
                     # front proxy sudah ada (static/proxy), replace ke port backend baru.
                     # SSL di front di-preserve otomatis oleh front_proxy_enable.
-                    new_eng.activate_site(domain)
+                    new_eng.activate_site(domain, running_dir)
                     webserver_ops.front_proxy_enable(domain, webserver_ops.backend_port(engine))
                     new_vhost = new_eng.vhost_path(domain)
             else:
-                new_eng.activate_site(domain)
+                new_eng.activate_site(domain, running_dir)
                 new_vhost = new_eng.vhost_path(domain)
             # 3. migrasi PHP block
             if php_version != "static":
@@ -309,7 +325,7 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
         except (webserver_ops.WebserverError, php_ops.PhpError) as e:
             # rollback: restore vhost lama
             try:
-                old_eng.activate_site(domain)
+                old_eng.activate_site(domain, running_dir)
             except Exception:
                 pass
             if multi:

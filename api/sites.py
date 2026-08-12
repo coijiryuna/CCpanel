@@ -36,6 +36,8 @@ class SiteCreate(BaseModel):
     db_name: str = ""
     db_user: str = ""
     db_pass: str = ""
+    site_dir: str = ""           # custom site directory (relative to root_path)
+    running_dir: str = ""        # running directory (e.g., public, public_html, ThinkPHP5, Laravel, Codeigniter)
 
 class DomainAdd(BaseModel):
     domain: str
@@ -44,6 +46,8 @@ class SiteResponse(BaseModel):
     id: int
     domain: str
     root_path: str
+    site_dir: str
+    running_dir: str
     vhost_path: str
     enabled: bool
     waf_enabled: bool
@@ -70,6 +74,8 @@ def _site_row(row, conn=None) -> SiteResponse:
         id=row["id"],
         domain=row["domain"],
         root_path=row["root_path"],
+        site_dir=row["site_dir"] if "site_dir" in row.keys() else "",
+        running_dir=row["running_dir"] if "running_dir" in row.keys() else "",
         vhost_path=row["vhost_path"],
         enabled=bool(row["enabled"]),
         waf_enabled=bool(row["waf_enabled"]),
@@ -156,7 +162,7 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
                 raise HTTPException(409, f"Domain tambahan sudah dipakai situs lain: {d}")
         eng = webserver_ops.for_engine(engine)
         try:
-            root = eng.create_site(domain)
+            root = eng.create_site(domain, running_dir)
         except webserver_ops.WebserverError as e:
             raise HTTPException(500, str(e)) from e
 
@@ -185,10 +191,12 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
                 else:
                     eng.nginx_set_server_names(domain, [domain] + extra) if hasattr(eng, "nginx_set_server_names") else None
             # insert site dulu supaya punya site_id
+            site_dir = (req.site_dir or "").strip()
+            running_dir = (req.running_dir or "").strip()
             cur = conn.execute(
-                "INSERT INTO sites (domain, root_path, vhost_path, enabled, owner_id, webserver, php_version, project_type, port, proxy_enabled, description, category, created_at) "
-                "VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
-                (domain, str(root), str(eng.vhost_path(domain)),
+                "INSERT INTO sites (domain, root_path, site_dir, running_dir, vhost_path, enabled, owner_id, webserver, php_version, project_type, port, proxy_enabled, description, category, created_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                (domain, str(root), site_dir, running_dir, str(eng.vhost_path(domain)),
                  None if user["role"] == "admin" else user["id"],
                  engine, php_version, ptype, port,
                  description, category,

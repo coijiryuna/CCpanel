@@ -101,6 +101,8 @@ def init_db() -> None:
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 domain     TEXT UNIQUE NOT NULL,
                 root_path  TEXT NOT NULL,
+                site_dir   TEXT NOT NULL DEFAULT '',
+                running_dir TEXT NOT NULL DEFAULT '',
                 vhost_path TEXT NOT NULL,
                 enabled    INTEGER NOT NULL DEFAULT 1,
                 waf_enabled INTEGER NOT NULL DEFAULT 0,

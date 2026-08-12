@@ -119,13 +119,14 @@ def nginx_reload() -> None:
         raise WebserverError(res.stderr.strip() or "lshttpd restart failed")
 
 
-def _write_vhost(domain: str, root: Path) -> None:
+def _write_vhost(domain: str, root: Path, running_dir: str = "") -> None:
     LSWS_CONF_DIR.mkdir(parents=True, exist_ok=True)
-    conf = VHOST_TEMPLATE.format(domain=domain, root=root)
+    doc_root = str(root / running_dir) if running_dir else str(root)
+    conf = VHOST_TEMPLATE.format(domain=domain, root=doc_root)
     vhost_path(domain).write_text(conf)
 
 def _write_vhost_with_features(domain: str, root: Path, features: dict) -> None:
-    """Write vhost with custom feature flags (for config modal updates)."""
+    """Write vhost with custom feature flags (for config modal updates) - OLS format."""
     LSWS_CONF_DIR.mkdir(parents=True, exist_ok=True)
     
     # Build vhost with feature flags
@@ -136,49 +137,95 @@ def _write_vhost_with_features(domain: str, root: Path, features: dict) -> None:
     server_admin = features.get("server_admin", f"webmaster@{domain}")
     error_log_path = features.get("error_log_path", "/www/wwwlogs/")
     custom_log_path = features.get("custom_log_path", "/www/wwwlogs/")
+    running_dir = features.get("running_dir", "")
     
-    deny_block = ""
+    doc_root = str(root / running_dir) if running_dir else str(root)
+    
+    # OLS uses different format - add context blocks for deny files and remote IP
+    deny_context = ""
     if deny_files:
-        deny_block = """    #DENY FILES
+        deny_context = f"""
+context / {{
+    location                {doc_root}/
+    allowBrowse             1
+    rewrite  {{
+        enable                  1
+        autoLoadHtaccess        1
+    }}
+    #DENY FILES
     <Files ~ (\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md)$>
         Order allow,deny
         Deny from all
     </Files>
-
-"""
+}}"""
     
-    remote_ip_block = ""
-    if remote_ip:
-        remote_ip_block = """    #Obtain the reverse proxy ip start
-    RemoteIPTrustedProxy 127.0.0.1
-    RemoteIPHeader X-Real-IP
-    #Obtain the reverse proxy ip end
-"""
+    # OLS doesn't use RemoteIP module like Apache - it gets real IP from X-Forwarded-For header
+    # The nginx front proxy already sets X-Real-IP and X-Forwarded-For
     
-    deflate_line = "        SetOutputFilter DEFLATE\n" if deflate else ""
-    
-    conf = f"""<VirtualHost *:80>
-    ServerAdmin {server_admin}
-    ServerName {domain}
-    DocumentRoot "{root}"
-    #errorDocument 404 /404.html
-    ErrorLog "{error_log_path}{domain}-error_log"
-    CustomLog "{custom_log_path}{domain}-access_log" combined
+    conf = f"""docroot                   {doc_root}/
+vhDomain                  {domain}
+enableGzip                1
+enableIpGeo               1
 
-{deny_block}    #PATH
-    <Directory "{root}">
-{deflate_line}        Options FollowSymLinks
-        AllowOverride All
-        Require all granted
-        DirectoryIndex {directory_index}
-    </Directory>
+index  {{
+    useServer               0
+    indexFiles              {directory_index.replace(' ', ',')}
+}}
 
-{remote_ip_block}</VirtualHost>
+errorlog $VH_ROOT/logs/error.log {{
+    useServer               0
+    logLevel                ERROR
+    rollingSize             10M
+}}
+
+accesslog $VH_ROOT/logs/access.log {{
+    useServer               0
+    logFormat               '%{{X-Forwarded-For}}i %h %l %u %t "%r" %>s %b "%{{Referer}}i" "%{{User-Agent}}i"'
+    logHeaders              5
+    rollingSize             10M
+    keepDays                10
+    compressArchive         1
+}}
+
+scripthandler  {{
+    add                     lsapi:{domain} php
+}}
+
+extprocessor {domain} {{
+    type                    lsapi
+    address                 UDS://tmp/lshttpd/{domain}.sock
+    maxConns                300
+    env                     LSAPI_CHILDREN=300
+    env                     LSAPI_AVOID_FORK=1
+    initTimeout             600
+    retryTimeout            5
+    persistConn             1
+    pcKeepAliveTimeout      30
+    respBuffer              0
+    autoStart               1
+    path                    /usr/local/lsws/lsphp00/bin/lsphp
+    extUser                 www
+    extGroup                www
+    memSoftLimit            2047M
+    memHardLimit            2047M
+    procSoftLimit           1000
+    procHardLimit           1100
+}}
+
+expires {{
+    enableExpires           1
+    expiresByType           image/*=A43200,text/css=A43200,application/x-javascript=A43200,application/javascript=A43200,font/*=A43200,application/x-font-ttf=A43200
+}}
+
+rewrite  {{
+    enable                  1
+    autoLoadHtaccess        1
+}}{deny_context}
 """
     vhost_path(domain).write_text(conf)
 
 
-def create_site(domain: str) -> Path:
+def create_site(domain: str, running_dir: str = "") -> Path:
     root = root_path(domain)
     if root.exists():
         raise WebserverError(f"Folder root sudah ada: {root}")
@@ -188,7 +235,7 @@ def create_site(domain: str) -> Path:
         raise WebserverError(f"Folder root sudah ada: {root}") from None
     try:
         (root / "index.html").write_text(DEFAULT_INDEX.format(domain=domain))
-        _write_vhost(domain, root)
+        _write_vhost(domain, root, running_dir)
         nginx_test()
     except Exception as e:
         vhost_path(domain).unlink(missing_ok=True)
@@ -200,13 +247,13 @@ def create_site(domain: str) -> Path:
     return root
 
 
-def activate_site(domain: str) -> None:
+def activate_site(domain: str, running_dir: str = "") -> None:
     root = root_path(domain)
     if not root.is_dir():
         raise WebserverError(f"Folder root tidak ada: {root}")
     if vhost_path(domain).exists():
         raise WebserverError(f"vhost {vhost_path(domain)} sudah ada")
-    _write_vhost(domain, root)
+    _write_vhost(domain, root, running_dir)
     try:
         nginx_test()
     except WebserverError:
