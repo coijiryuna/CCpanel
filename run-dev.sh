@@ -16,6 +16,7 @@ export CCPANEL_PHP_FPM_DIR="$CCPANEL_DATA_DIR/php"
 export CCPANEL_SITEFEAT_DIR="$CCPANEL_DATA_DIR/sitefeat"
 export CCPANEL_APACHE_CONF_DIR="$CCPANEL_DATA_DIR/apache"
 export CCPANEL_APACHE_PORTS_CONF="$CCPANEL_DATA_DIR/apache/ports.conf"
+export CCPANEL_LSWS_CONF_DIR="$CCPANEL_DATA_DIR/lsws"
 export PANEL_PASSWORD="${PANEL_PASSWORD:-test123}"
 export PANEL_JWT_SECRET="${PANEL_JWT_SECRET:-dev-secret}"
 export CCPANEL_WEBSERVER="${CCPANEL_WEBSERVER:-nginx}"
@@ -23,12 +24,13 @@ export CCPANEL_WEBSERVER="${CCPANEL_WEBSERVER:-nginx}"
 # --- Mock binary nginx/apachectl/systemctl (dev aman, tak sentuh service asli) ---
 _MOCK="$CCPANEL_DATA_DIR/devbin"
 mkdir -p "$_MOCK"
-for b in nginx apachectl systemctl mysql mariadb php-fpm8.1 php-fpm8.2 php-fpm8.3 php-fpm8.4; do
+for b in nginx apachectl lshttpd systemctl mysql mariadb php-fpm8.1 php-fpm8.2 php-fpm8.3 php-fpm8.4; do
   if [ ! -x "$_MOCK/$b" ]; then
     printf '#!/bin/sh\nexit 0\n' > "$_MOCK/$b"
     chmod +x "$_MOCK/$b"
   fi
 done
+export CCPANEL_LSWS_BIN="$_MOCK/lshttpd"
 # docker mock: ps/images/log/info sukses, action no-op (dev tanpa docker asli)
 if [ ! -x "$_MOCK/docker" ]; then
   cat > "$_MOCK/docker" <<'EOF'

@@ -36,17 +36,61 @@ def _listen_port() -> int:
 VHOST_TEMPLATE = """docroot                   {root}/
 vhDomain                  {domain}
 enableGzip                1
-errorlog                  $VH_ROOT/logs/error.log
-accesslog                 $VH_ROOT/logs/access.log $VH_NAME
-index                     index.html index.htm
+enableIpGeo               1
 
-rewrite  {{
-    enable                 1
-    autoLoadHtaccess       1
+index  {{
+    useServer               0
+    indexFiles              index.php,index.html,index.htm
 }}
 
-realm {domain} {{
-    type  protected
+errorlog $VH_ROOT/logs/error.log {{
+    useServer               0
+    logLevel                ERROR
+    rollingSize             10M
+}}
+
+accesslog $VH_ROOT/logs/access.log {{
+    useServer               0
+    logFormat               '%{{X-Forwarded-For}}i %h %l %u %t "%r" %>s %b "%{{Referer}}i" "%{{User-Agent}}i"'
+    logHeaders              5
+    rollingSize             10M
+    keepDays                10
+    compressArchive         1
+}}
+
+scripthandler  {{
+    add                     lsapi:{domain} php
+}}
+
+extprocessor {domain} {{
+    type                    lsapi
+    address                 UDS://tmp/lshttpd/{domain}.sock
+    maxConns                300
+    env                     LSAPI_CHILDREN=300
+    env                     LSAPI_AVOID_FORK=1
+    initTimeout             600
+    retryTimeout            5
+    persistConn             1
+    pcKeepAliveTimeout      30
+    respBuffer              0
+    autoStart               1
+    path                    /usr/local/lsws/lsphp00/bin/lsphp
+    extUser                 www
+    extGroup                www
+    memSoftLimit            2047M
+    memHardLimit            2047M
+    procSoftLimit           1000
+    procHardLimit           1100
+}}
+
+expires {{
+    enableExpires           1
+    expiresByType           image/*=A43200,text/css=A43200,application/x-javascript=A43200,application/javascript=A43200,font/*=A43200,application/x-font-ttf=A43200
+}}
+
+rewrite  {{
+    enable                  1
+    autoLoadHtaccess        1
 }}
 """
 

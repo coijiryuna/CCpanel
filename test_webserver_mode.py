@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 from core import apache as apache_ops
+from core import litespeed as litespeed_ops
 from core import nginx as nginx_ops
 from core import webserver as webserver_ops
 
@@ -94,7 +95,20 @@ def test_front_proxy_enable(monkeypatch):
     conf = vh.read_text()
     assert "listen 80;" in conf
     assert "proxy_pass http://127.0.0.1:8288;" in conf
-    assert "try_files" not in conf
+    # try_files hanya di blok .well-known (bukan location /)
+    assert "try_files" in conf
+    assert "location / {" in conf
+    assert "try_files $uri $uri/ =404;" not in conf
+    # header proxy lengkap ala aaPanel
+    assert "proxy_http_version 1.1;" in conf
+    assert "proxy_set_header Upgrade $http_upgrade;" in conf
+    assert "proxy_set_header Connection \"upgrade\";" in conf
+    assert "proxy_set_header HTTPS $https;" in conf
+    # blok keamanan front
+    assert "location ~ ^/(\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md) {" in conf
+    assert "location ~ \\.well-known {" in conf
+    # log akses
+    assert f"access_log /www/wwwlogs/{domain}.log;" in conf
     assert conf.count("{") == conf.count("}"), "kurung tidak seimbang"
 
 def test_front_proxy_disable(monkeypatch):
@@ -148,6 +162,31 @@ def test_front_proxy_preserve_ssl(monkeypatch):
     assert "ssl_certificate /etc/letsencrypt/live/ssl1.example.com/fullchain.pem;" in conf
     assert "ssl_certificate_key /etc/letsencrypt/live/ssl1.example.com/privkey.pem;" in conf
     assert conf.count("{") == conf.count("}"), "kurung tidak seimbang"
+
+def test_ols_vhost_template_aaPanel(monkeypatch):
+    """Template OLS ala aaPanel: docRoot, accesslog X-Forwarded-For,
+    index block, expires, scripthandler lsapi."""
+    monkeypatch.setenv("CCPANEL_WEBSERVER_MODE", "multi")
+    domain = _domain("ols1")
+    vh = litespeed_ops.vhost_path(domain)
+    vh.parent.mkdir(parents=True, exist_ok=True)
+    root = litespeed_ops.root_path(domain)
+    root.mkdir(parents=True, exist_ok=True)
+    litespeed_ops._write_vhost(domain, root)
+    text = vh.read_text()
+    assert "docroot" in text and str(root) in text
+    assert "enableIpGeo               1" in text
+    assert "indexFiles              index.php,index.html,index.htm" in text
+    # accesslog pakai X-Forwarded-For (IP client asli di belakang nginx proxy)
+    assert "%{X-Forwarded-For}i %h %l %u %t" in text
+    assert "keepDays                10" in text
+    assert "compressArchive         1" in text
+    # scripthandler + extprocessor lsapi
+    assert f"add                     lsapi:{domain} php" in text
+    assert f"address                 UDS://tmp/lshttpd/{domain}.sock" in text
+    assert "path                    /usr/local/lsws/lsphp00/bin/lsphp" in text
+    assert "expiresByType" in text
+    assert "autoLoadHtaccess        1" in text
 
 # ------------------------------------------------- create_site multi: backend
 
