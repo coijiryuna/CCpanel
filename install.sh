@@ -82,6 +82,36 @@ setup_php_repos
 echo "==> Install paket sistem ($PHP_PKGS)"
 apt install -y nginx mariadb-server $PHP_PKGS python3-venv python3-pip certbot python3-certbot-nginx
 
+# --- Install Apache (backend port 8288) ---
+echo "==> Install Apache (backend port 8288)"
+apt install -y apache2 libapache2-mod-fcgid
+# Disable default site, enable required modules
+a2dissite 000-default 2>/dev/null || true
+a2enmod proxy proxy_http proxy_fcgi rewrite headers remoteip deflate ssl 2>/dev/null || true
+# Configure Apache to listen on backend port 8288
+if ! grep -q "^Listen 8288" /etc/apache2/ports.conf; then
+  echo "Listen 8288" >> /etc/apache2/ports.conf
+fi
+# Create Apache vhost directory for panel
+mkdir -p /etc/apache2/sites-available /etc/apache2/sites-enabled
+mkdir -p /www/server/panel/vhost/apache/extension
+
+# --- Install OpenLiteSpeed (backend port 8188) ---
+echo "==> Install OpenLiteSpeed (backend port 8188)"
+# Add OpenLiteSpeed repo
+if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ] || [ "$ID" = "linuxmint" ]; then
+  wget -qO - https://rpms.litespeedtech.com/debian/enable_lst_debian_repo.sh | bash 2>/dev/null || true
+  apt update
+  apt install -y openlitespeed lsphp81 lsphp82 lsphp83 lsphp84 2>/dev/null || apt install -y openlitespeed
+fi
+# Create OLS vhost directory for panel
+mkdir -p /usr/local/lsws/conf/vhosts
+mkdir -p /www/server/panel/vhost/litespeed/extension
+
+# Enable and start Apache and OpenLiteSpeed services
+systemctl enable --now apache2 2>/dev/null || true
+systemctl enable --now lsws 2>/dev/null || true
+
 APP_DIR="${APP_DIR:-/opt/ccpanel}"
 echo "==> Salin project ke $APP_DIR"
 mkdir -p "$APP_DIR"
@@ -97,8 +127,8 @@ python3 -m venv .venv
 ##cd dashboard && npm install && npm run build && cd ..
 ## Tidak perlu karena sudah build static
 
-echo "==> Folder website + trash + project"
-mkdir -p /www/wwwroot /www/trash /www/project
+echo "==> Folder website + trash + project + logs"
+mkdir -p /www/wwwroot /www/trash /www/project /www/wwwlogs
 
 echo "==> Systemd service + env"
 # Upgrade: pakai credential lama kalau ada (jangan generate ulang)
