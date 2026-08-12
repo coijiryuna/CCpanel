@@ -82,6 +82,33 @@ def test_apache_ensure_listen_single(monkeypatch, tmp_path):
     apache_ops._ensure_listen(80)
     assert ports.read_text() == "Listen 80\n"
 
+def test_apache_vhost_template_aaPanel(monkeypatch):
+    """Template apache ala aaPanel: ServerAdmin, log ke /www/wwwlogs,
+    DENY FILES, DirectoryIndex, RemoteIP (IP client asli di belakang nginx)."""
+    monkeypatch.setenv("CCPANEL_WEBSERVER_MODE", "multi")
+    domain = _domain("apaa")
+    vh = apache_ops.vhost_path(domain)
+    vh.parent.mkdir(parents=True, exist_ok=True)
+    root = apache_ops.root_path(domain)
+    root.mkdir(parents=True, exist_ok=True)
+    apache_ops._write_vhost(domain, root)
+    text = vh.read_text()
+    assert f"<VirtualHost *:8288>" in text
+    assert f"ServerAdmin webmaster@{domain}" in text
+    assert f"DocumentRoot \"{root}\"" in text
+    # log ke /www/wwwlogs (sama aaPanel)
+    assert f"ErrorLog \"/www/wwwlogs/{domain}-error_log\"" in text
+    assert f"CustomLog \"/www/wwwlogs/{domain}-access_log\" combined" in text
+    # blok keamanan
+    assert "<Files ~ (\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md)$>" in text
+    assert "Deny from all" in text
+    # directory config
+    assert "SetOutputFilter DEFLATE" in text
+    assert "DirectoryIndex index.php index.html index.htm default.php default.html default.htm" in text
+    # RemoteIP — IP client asli di belakang nginx proxy
+    assert "RemoteIPTrustedProxy 127.0.0.1" in text
+    assert "RemoteIPHeader X-Real-IP" in text
+
 # ------------------------------------------------------------- front proxy
 
 def test_front_proxy_enable(monkeypatch):
@@ -104,9 +131,15 @@ def test_front_proxy_enable(monkeypatch):
     assert "proxy_set_header Upgrade $http_upgrade;" in conf
     assert "proxy_set_header Connection \"upgrade\";" in conf
     assert "proxy_set_header HTTPS $https;" in conf
+    assert "proxy_set_header REMOTE-HOST $remote_addr;" in conf
+    assert "proxy_set_header SERVER_PROTOCOL $server_protocol;" in conf
+    assert "proxy_set_header REMOTE_ADDR $remote_addr;" in conf
+    assert "proxy_set_header REMOTE_PORT $remote_port;" in conf
+    assert "add_header Cache-Control no-cache;" in conf
     # blok keamanan front
     assert "location ~ ^/(\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md) {" in conf
     assert "location ~ \\.well-known {" in conf
+    assert "if ( $uri ~ \"^/\\.well-known/.*\\.(php|jsp|py|js|css|lua|ts|go|zip|tar\\.gz|rar|7z|sql|bak)$\" ) {" in conf
     # log akses
     assert f"access_log /www/wwwlogs/{domain}.log;" in conf
     assert conf.count("{") == conf.count("}"), "kurung tidak seimbang"

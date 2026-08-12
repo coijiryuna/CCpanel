@@ -46,14 +46,32 @@ def _ensure_listen(port: int) -> None:
     APACHE_PORTS_CONF.write_text(text.rstrip() + f"\nListen {port}\n")
 
 VHOST_TEMPLATE = """<VirtualHost *:{port}>
+    ServerAdmin webmaster@{domain}
     ServerName {domain}
-    DocumentRoot {root}
+    DocumentRoot "{root}"
+    #errorDocument 404 /404.html
+    ErrorLog "/www/wwwlogs/{domain}-error_log"
+    CustomLog "/www/wwwlogs/{domain}-access_log" combined
 
-    <Directory {root}>
-        Options Indexes FollowSymLinks
+    #DENY FILES
+    <Files ~ (\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md)$>
+        Order allow,deny
+        Deny from all
+    </Files>
+
+    #PATH
+    <Directory "{root}">
+        SetOutputFilter DEFLATE
+        Options FollowSymLinks
         AllowOverride All
         Require all granted
+        DirectoryIndex index.php index.html index.htm default.php default.html default.htm
     </Directory>
+
+    #Obtain the reverse proxy ip start
+    RemoteIPTrustedProxy 127.0.0.1
+    RemoteIPHeader X-Real-IP
+    #Obtain the reverse proxy ip end
 </VirtualHost>
 """
 
