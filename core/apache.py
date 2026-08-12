@@ -108,6 +108,60 @@ def _write_vhost(domain: str, root: Path) -> None:
     conf = VHOST_TEMPLATE.format(domain=domain, root=root, port=_listen_port())
     vhost_path(domain).write_text(conf)
 
+def _write_vhost_with_features(domain: str, root: Path, features: dict) -> None:
+    """Write vhost with custom feature flags (for config modal updates)."""
+    APACHE_CONF_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_listen(_listen_port())
+    
+    # Build vhost with feature flags
+    deny_files = features.get("deny_files", True)
+    remote_ip = features.get("remote_ip", True)
+    deflate = features.get("deflate", True)
+    directory_index = features.get("directory_index", "index.php index.html index.htm default.php default.html default.htm")
+    server_admin = features.get("server_admin", f"webmaster@{domain}")
+    error_log_path = features.get("error_log_path", "/www/wwwlogs/")
+    custom_log_path = features.get("custom_log_path", "/www/wwwlogs/")
+    
+    deny_block = ""
+    if deny_files:
+        deny_block = """    #DENY FILES
+    <Files ~ (\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md)$>
+        Order allow,deny
+        Deny from all
+    </Files>
+
+"""
+    
+    remote_ip_block = ""
+    if remote_ip:
+        remote_ip_block = """    #Obtain the reverse proxy ip start
+    RemoteIPTrustedProxy 127.0.0.1
+    RemoteIPHeader X-Real-IP
+    #Obtain the reverse proxy ip end
+"""
+    
+    deflate_line = "        SetOutputFilter DEFLATE\n" if deflate else ""
+    
+    conf = f"""<VirtualHost *:{_listen_port()}>
+    ServerAdmin {server_admin}
+    ServerName {domain}
+    DocumentRoot "{root}"
+    #errorDocument 404 /404.html
+    ErrorLog "{error_log_path}{domain}-error_log"
+    CustomLog "{custom_log_path}{domain}-access_log" combined
+
+{deny_block}    #PATH
+    <Directory "{root}">
+{deflate_line}        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+        DirectoryIndex {directory_index}
+    </Directory>
+
+{remote_ip_block}</VirtualHost>
+"""
+    vhost_path(domain).write_text(conf)
+
 
 def create_site(domain: str) -> Path:
     root = root_path(domain)

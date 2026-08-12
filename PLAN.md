@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-Bangun hosting control panel (pola aaPanel: Python backend + web frontend) untuk kelola website di VPS: buat/hapus site (folder + nginx vhost), kelola MySQL/MariaDB DB, pasang SSL (certbot), file manager. Backend jalan sebagai root, semua aksi sistem via subprocess argumen-list + validasi ketat.
+Bangun hosting control panel (pola : Python backend + web frontend) untuk kelola website di VPS: buat/hapus site (folder + nginx vhost), kelola MySQL/MariaDB DB, pasang SSL (certbot), file manager. Backend jalan sebagai root, semua aksi sistem via subprocess argumen-list + validasi ketat.
 
 ## Scope — v1 vs Future (penting: jangan campur saat implementasi)
 
@@ -42,12 +42,12 @@ CCpanel/
 │   ├── mysql.py       # create/drop DB + user (argumen list, tanpa shell)
 │   └── cert.py        # certbot --non-interactive wrapper
 ├── data/              # SQLite: users, sites, dbs (gitignore)
-├── static/             # hasil build frontend (Vue+Vite, jangan edit manual)
-├── frontend/           # source Vue 3 + Vite (npm run build → static/)
+├── static/            # hasil build frontend (Vue+Vite, jangan edit manual)
+├── dashboard/         # source Vue 3 + Vite (npm run build → static/)
 ├── templates/         # nginx vhost template
 ├── requirements.txt
 ├── .gitignore
-└── README.md          # install + run di Ubuntu
+└── README.md          # install + run di Ubuntu/Debian
 ```
 
 ## Skema DB (SQLite)
@@ -72,7 +72,7 @@ CCpanel/
 
 ### Phase 3 — Database _(depends Phase 2)_
 
-6. `core/mysql.py`: `mysql` via subprocess argumen-list: create DB, create user@host, GRANT. Form DB (konsep cPanel/aaPanel): DB Name, Username (terpisah, default = nama DB), Password (user-defined atau generate), Permission (`localhost`/`%`/IP). Password disimpan (plaintext, hanya admin panel bisa lihat/copy, default hidden). Endpoint `POST/DELETE /api/dbs`.
+6. `core/mysql.py`: `mysql` via subprocess argumen-list: create DB, create user@host, GRANT. Form DB (konsep): DB Name, Username (terpisah, default = nama DB), Password (user-defined atau generate), Permission (`localhost`/`%`/IP). Password disimpan (plaintext, hanya admin panel bisa lihat/copy, default hidden). Endpoint `POST/DELETE /api/dbs`.
 
 ### Phase 4 — SSL + File manager _(depends Phase 3)_
 

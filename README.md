@@ -7,8 +7,8 @@ Hosting control panel ala cPanel/aaPanel untuk VPS Ubuntu/Debian. Kelola website
 ## Fitur v1
 
 - CRUD website: buat/hapus site (folder + nginx vhost), enable/disable
-- Multi web server (arsitektur aaPanel): mode **single** (satu engine pegang 80/443) atau **multi** — nginx front di 80/443, Apache backend **8288**, OpenLiteSpeed backend **8188**. Engine jalan barengan; site engine backend otomatis dapat nginx vhost proxy → port backend. Ganti mode di Settings → Arsitektur Web Server
-- Tabs proyek ala aaPanel (Static/PHP/Node/Python/Go/Docker): list site difilter per tab, buat site pilih tipe proyek
+- Multi web server (arsitektur): mode **single** (satu engine pegang 80/443) atau **multi** — nginx front di 80/443, Apache backend **8288**, OpenLiteSpeed backend **8188**. Engine jalan barengan; site engine backend otomatis dapat nginx vhost proxy → port backend. Ganti mode di Settings → Arsitektur Web Server
+- Tabs proyek (Static/PHP/Node/Python/Go/Docker): list site difilter per tab, buat site pilih tipe proyek
 - Multi-domain per site: pasang/lepas domain alias (update `server_name` vhost otomatis, rollback kalau gagal)
 - Proxy project: site bisa punya port + mode proxy penuh — nginx listen di port itu dan forward `location /` ke app di `127.0.0.1:<port>`. Cocok untuk Node.js/Python/Go/Docker app (runner via App Manager, subpath juga didukung)
 - PHP per-site: pilih versi PHP (static/8.1/8.2/8.3) per website — pool php-fpm + block fastcgi di vhost dibuat otomatis, switch versi kapan saja

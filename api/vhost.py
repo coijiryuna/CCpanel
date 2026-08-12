@@ -53,28 +53,58 @@ async def put_vhost_config(site_id: int, req: Request, user: dict = Depends(requ
 
 @app.get("/api/sites/{site_id}/config")
 def get_site_config(site_id: int, user: dict = Depends(require_auth)) -> dict:
-    """State fitur site: rewrite rules, anti-XSS, access log + engine + vhost."""
+    """State fitur site: rewrite rules, anti-XSS, access log + engine + vhost + backend features.
+    Multi mode + backend engine: return DUA vhost (nginx front + backend)."""
     with get_db() as conn:
         row = check_site_access(conn, site_id, user)
         domain = row["domain"]
+        engine = row["webserver"]
+        multi = webserver_ops.is_multi()
+        
+        # Backend vhost (engine-specific)
         vh = Path(row["vhost_path"])
         if not vh.exists():
             raise HTTPException(500, f"vhost {vh} tidak ada")
-        content = vh.read_text()
+        backend_content = vh.read_text()
+        backend_feats = _parse_backend_features(backend_content, engine)
+        
+        # Nginx front vhost (multi mode + backend engine)
+        nginx_vhost_path = None
+        nginx_content = None
+        if multi and engine in ("apache", "litespeed"):
+            nginx_vh = webserver_ops.nginx.vhost_path(domain)
+            if nginx_vh.exists():
+                nginx_vhost_path = str(nginx_vh)
+                nginx_content = nginx_vh.read_text()
+        
         feats = siteconfig_ops.state(domain)
+    
     return {
-        "engine": row["webserver"],
+        "engine": engine,
         "vhost_path": str(vh),
-        "vhost_content": content,
+        "vhost_content": backend_content,
         "rewrite_rules": feats["rewrite_rules"],
         "xss_enabled": feats["xss_enabled"],
         "accesslog_enabled": feats["accesslog_enabled"],
+        # Apache/OLS features
+        "deny_files_enabled": backend_feats.get("deny_files_enabled", True),
+        "remote_ip_enabled": backend_feats.get("remote_ip_enabled", True),
+        "deflate_enabled": backend_feats.get("deflate_enabled", True),
+        "directory_index": backend_feats.get("directory_index", "index.php index.html index.htm default.php default.html default.htm"),
+        "server_admin": backend_feats.get("server_admin", f"webmaster@{domain}"),
+        "error_log_path": backend_feats.get("error_log_path", "/www/wwwlogs/"),
+        "custom_log_path": backend_feats.get("custom_log_path", "/www/wwwlogs/"),
+        # Multi mode: nginx front vhost
+        "multi_mode": multi,
+        "nginx_vhost_path": nginx_vhost_path,
+        "nginx_vhost_content": nginx_content,
     }
 
 
 @app.put("/api/sites/{site_id}/config")
 async def put_site_config(site_id: int, req: Request, user: dict = Depends(require_auth)) -> dict:
-    """Simpan fitur site: rewrite rules, anti-XSS, access log. Test + reload."""
+    """Simpan fitur site: rewrite rules, anti-XSS, access log + backend features. Test + reload.
+    Multi mode + backend engine: handle DUA vhost (nginx front + backend)."""
     import json
 
     try:
@@ -85,36 +115,124 @@ async def put_site_config(site_id: int, req: Request, user: dict = Depends(requi
     with get_db() as conn:
         row = check_site_access(conn, site_id, user)
         domain = row["domain"]
+        engine = row["webserver"]
+        multi = webserver_ops.is_multi()
+        
+        # Backend vhost
         vh = Path(row["vhost_path"])
         if not vh.exists():
             raise HTTPException(400, f"vhost {vh} tidak ada")
-        eng = webserver_ops.for_engine(row["webserver"])
+        eng = webserver_ops.for_engine(engine)
+        
+        # Nginx front vhost (multi mode + backend engine)
+        nginx_vh = None
+        if multi and engine in ("apache", "litespeed"):
+            nginx_vh = webserver_ops.nginx.vhost_path(domain)
+        
         try:
-            # vhost content dulu (semua engine) — nanti fitur sisip include ke file ini
+            # 1. Backend vhost content
             if "vhost_content" in body:
                 vh.write_text(body["vhost_content"])
-            # fitur rewrite/xss/accesslog HANYA nginx
-            if row["webserver"] != "nginx":
-                if any(k in body for k in ("rewrite_rules", "xss_enabled", "accesslog_enabled")):
-                    raise siteconfig_ops.Error(
-                        f"Rewrite/XSS/Access log hanya untuk site nginx (site ini: {row['webserver']})"
-                    )
-            else:
-                # rewrite rules
+            
+            # 2. Nginx front vhost content (multi mode + backend engine)
+            if multi and engine in ("apache", "litespeed") and "nginx_vhost_content" in body:
+                if nginx_vh and nginx_vh.exists():
+                    nginx_vh.write_text(body["nginx_vhost_content"])
+            
+            # 3. fitur rewrite/xss/accesslog HANYA nginx front (multi mode) atau nginx engine
+            if engine == "nginx":
+                # Single mode nginx atau multi mode nginx engine
                 if "rewrite_rules" in body:
                     siteconfig_ops.set_rewrite(domain, body.get("rewrite_rules", ""), vh)
-                # anti-xss
                 if "xss_enabled" in body:
                     siteconfig_ops.set_xss(domain, bool(body["xss_enabled"]), vh)
-                # access log
                 if "accesslog_enabled" in body:
                     siteconfig_ops.set_accesslog(domain, bool(body["accesslog_enabled"]), vh)
+            elif multi and engine in ("apache", "litespeed"):
+                # Multi mode: nginx front handle rewrite/xss/accesslog
+                if nginx_vh and nginx_vh.exists():
+                    if "rewrite_rules" in body:
+                        siteconfig_ops.set_rewrite(domain, body.get("rewrite_rules", ""), nginx_vh)
+                    if "xss_enabled" in body:
+                        siteconfig_ops.set_xss(domain, bool(body["xss_enabled"]), nginx_vh)
+                    if "accesslog_enabled" in body:
+                        siteconfig_ops.set_accesslog(domain, bool(body["accesslog_enabled"]), nginx_vh)
+            
+            # 4. Apache/OLS backend features
+            if engine in ("apache", "litespeed"):
+                _apply_backend_features(domain, engine, vh, body)
+            
+            # 5. Test both configs
             eng.nginx_test()
+            if multi and engine in ("apache", "litespeed") and nginx_vh and nginx_vh.exists():
+                webserver_ops.nginx.nginx_test()
         except (webserver_ops.WebserverError, siteconfig_ops.Error) as e:
             raise HTTPException(400, str(e)) from e
         _log(conn, user, "site.config", domain)
+    
+    # Reload both
     eng.nginx_reload()
+    if multi and engine in ("apache", "litespeed"):
+        webserver_ops.nginx.nginx_reload()
     return {"ok": True}
+
+
+def _parse_backend_features(content: str, engine: str) -> dict:
+    """Parse Apache/OLS features from vhost content."""
+    if engine not in ("apache", "litespeed"):
+        return {}
+    import re
+    return {
+        "deny_files_enabled": "DENY FILES" in content and "Deny from all" in content,
+        "remote_ip_enabled": "RemoteIPTrustedProxy" in content and "RemoteIPHeader" in content,
+        "deflate_enabled": "SetOutputFilter DEFLATE" in content,
+        "directory_index": re.search(r"DirectoryIndex\s+([^\n]+)", content).group(1).strip() if re.search(r"DirectoryIndex\s+([^\n]+)", content) else "",
+        "server_admin": re.search(r"ServerAdmin\s+([^\n]+)", content).group(1).strip() if re.search(r"ServerAdmin\s+([^\n]+)", content) else "",
+        "error_log_path": re.search(r'ErrorLog\s+"([^"]+)"', content).group(1).strip() if re.search(r'ErrorLog\s+"([^"]+)"', content) else "",
+        "custom_log_path": re.search(r'CustomLog\s+"([^"]+)"', content).group(1).strip() if re.search(r'CustomLog\s+"([^"]+)"', content) else "",
+    }
+
+def _apply_backend_features(domain: str, engine: str, vh: Path, body: dict) -> None:
+    """Regenerate vhost with updated Apache/OLS features."""
+    from core import webserver as webserver_ops
+    
+    root = webserver_ops.root_path(domain)
+    if not root.is_dir():
+        return
+    
+    # Get current features from body
+    deny_files = body.get("deny_files_enabled", True)
+    remote_ip = body.get("remote_ip_enabled", True)
+    deflate = body.get("deflate_enabled", True)
+    directory_index = body.get("directory_index", "index.php index.html index.htm default.php default.html default.htm")
+    server_admin = body.get("server_admin", f"webmaster@{domain}")
+    error_log_path = body.get("error_log_path", "/www/wwwlogs/")
+    custom_log_path = body.get("custom_log_path", "/www/wwwlogs/")
+    
+    if engine == "apache":
+        # Regenerate apache vhost with features
+        from core import apache as apache_ops
+        apache_ops._write_vhost_with_features(domain, root, {
+            "deny_files": deny_files,
+            "remote_ip": remote_ip,
+            "deflate": deflate,
+            "directory_index": directory_index,
+            "server_admin": server_admin,
+            "error_log_path": error_log_path,
+            "custom_log_path": custom_log_path,
+        })
+    elif engine == "litespeed":
+        # Regenerate OLS vhost with features
+        from core import litespeed as litespeed_ops
+        litespeed_ops._write_vhost_with_features(domain, root, {
+            "deny_files": deny_files,
+            "remote_ip": remote_ip,
+            "deflate": deflate,
+            "directory_index": directory_index,
+            "server_admin": server_admin,
+            "error_log_path": error_log_path,
+            "custom_log_path": custom_log_path,
+        })
 
 
 @app.post("/api/sites/{site_id}/engine")
