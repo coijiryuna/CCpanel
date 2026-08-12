@@ -124,6 +124,31 @@ def test_front_proxy_enable_overwrite(monkeypatch):
     assert conf.count("proxy_pass http://127.0.0.1:8288;") == 1
     assert conf.count("{") == conf.count("}")
 
+def test_front_proxy_preserve_ssl(monkeypatch):
+    """SSL (443 + ssl_*) dari vhost lama di-preserve saat front proxy
+    ditimpa — site backend tetap HTTPS setelah switch engine."""
+    monkeypatch.setenv("CCPANEL_WEBSERVER_MODE", "multi")
+    domain = _domain("ssl1")
+    vh = _nginx_vhost(domain)
+    vh.parent.mkdir(parents=True, exist_ok=True)
+    vh.write_text(
+        "server {\n"
+        "    listen 80;\n"
+        "    listen 443 ssl http2;\n"
+        "    server_name ssl1.example.com;\n"
+        "    ssl_certificate /etc/letsencrypt/live/ssl1.example.com/fullchain.pem;\n"
+        "    ssl_certificate_key /etc/letsencrypt/live/ssl1.example.com/privkey.pem;\n"
+        "    location / { try_files $uri $uri/ =404; }\n"
+        "}\n"
+    )
+    webserver_ops.front_proxy_enable(domain, webserver_ops.backend_port("apache"))
+    conf = vh.read_text()
+    assert "proxy_pass http://127.0.0.1:8288;" in conf
+    assert "listen 443 ssl http2;" in conf
+    assert "ssl_certificate /etc/letsencrypt/live/ssl1.example.com/fullchain.pem;" in conf
+    assert "ssl_certificate_key /etc/letsencrypt/live/ssl1.example.com/privkey.pem;" in conf
+    assert conf.count("{") == conf.count("}"), "kurung tidak seimbang"
+
 # ------------------------------------------------- create_site multi: backend
 
 def test_create_site_backend_multi(monkeypatch):

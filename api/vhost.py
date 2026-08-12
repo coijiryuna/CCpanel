@@ -156,8 +156,11 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
             raise HTTPException(400, f"Folder root tidak ada: {root}")
 
         try:
-            # 1. hapus vhost lama (root tetap)
-            old_eng.remove_vhost(domain)
+            # 1. hapus vhost lama (root tetap). multi + old==nginx: vhost nginx
+            #    = front proxy, JANGAN dihapus — front_proxy_enable akan
+            #    overwrite + preserve direktif SSL (site tetap HTTPS).
+            if not (multi and old_engine == "nginx"):
+                old_eng.remove_vhost(domain)
             # 2. buat vhost baru pakai folder root yang sama.
             #    multi mode: nginx front = proxy/static vhost di 80, backend
             #    engine = vhost di port backend. Switch engine backend punya
@@ -169,9 +172,8 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
                     new_vhost = webserver_ops.for_engine("nginx").vhost_path(domain)
                 else:
                     # nginx -> backend / backend -> backend lain:
-                    # front proxy sudah ada (static/proxy), replace ke port backend baru
-                    if old_engine != "nginx":
-                        webserver_ops.for_engine("nginx").remove_vhost(domain)
+                    # front proxy sudah ada (static/proxy), replace ke port backend baru.
+                    # SSL di front di-preserve otomatis oleh front_proxy_enable.
                     new_eng.activate_site(domain)
                     webserver_ops.front_proxy_enable(domain, webserver_ops.backend_port(engine))
                     new_vhost = new_eng.vhost_path(domain)

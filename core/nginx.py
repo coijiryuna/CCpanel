@@ -305,10 +305,20 @@ def proxy_disable(domain: str) -> None:
 # di port khusus (8288/8188). Site backend dapat nginx vhost di 80 yang
 # proxy_pass ke 127.0.0.1:<port-backend>. listen SELALU 80 (front).
 
-def _front_proxy_conf(domain: str, port: int) -> str:
+_SSL_DIRECTIVE_RE = re.compile(
+    r"\n[ \t]*(listen\s+443[^;]*;|ssl_certificate[^;]*;|ssl_certificate_key[^;]*;"
+    r"|ssl_trusted_certificate[^;]*;|ssl_dhparam[^;]*;|ssl_session_cache[^;]*;"
+    r"|ssl_session_timeout[^;]*;|ssl_protocols[^;]*;|ssl_ciphers[^;]*;"
+    r"|ssl_prefer_server_ciphers[^;]*;|ssl_stapling[^;]*;|ssl_stapling_verify[^;]*;)"
+)
+
+def _front_proxy_conf(domain: str, port: int, ssl: str = "") -> str:
+    """conf front proxy. `ssl` = direktif SSL dari vhost lama (preserve
+    supaya TLS termination tetap jalan saat vhost front ditimpa ulang)."""
     return (
         "server {\n"
-        f"    listen 80;\n"
+        "    listen 80;\n"
+        f"{ssl}"
         f"    server_name {domain};\n"
         "\n"
         f"    location / {{\n"
@@ -321,15 +331,21 @@ def _front_proxy_conf(domain: str, port: int) -> str:
         "}\n"
     )
 
+def _extract_ssl_directives(conf: str) -> str:
+    """Ambil semua direktif SSL (listen 443 + ssl_*) dari conf, dipisah newline."""
+    return "".join(m.group(0) + "\n" for m in _SSL_DIRECTIVE_RE.finditer(conf))
+
 def front_proxy_enable(domain: str, port: int) -> None:
     """Multi mode: tulis/replace nginx vhost front proxy -> backend port.
-    Vhost lama (static/proxy) ditimpa. nginx -t dulu; rollback backup kalau gagal."""
+    Direktif SSL (443 + ssl_*) dari vhost lama di-PRESERVE — site tetap HTTPS
+    setelah switch engine / recreate front. nginx -t dulu; rollback backup kalau gagal."""
     if not validate.valid_domain(domain):
         raise NginxError(f"Domain tidak valid: {domain}")
     vh = vhost_path(domain)
     NGINX_CONF_DIR.mkdir(parents=True, exist_ok=True)
     backup = vh.read_text() if vh.exists() else None
-    vh.write_text(_front_proxy_conf(domain, port))
+    ssl = _extract_ssl_directives(backup) if backup else ""
+    vh.write_text(_front_proxy_conf(domain, port, ssl))
     try:
         nginx_test()
     except NginxError:
