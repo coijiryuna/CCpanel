@@ -69,3 +69,13 @@ def test_state():
     assert st["rewrite_rules"]
     assert st["xss_enabled"] is False
     assert st["accesslog_enabled"] is True
+
+
+def test_nginx_create_site_with_running_dir():
+    domain = "runningdir.example.com"
+    running_dir = "public_html"
+    webserver_ops.for_engine("nginx").create_site(domain, running_dir=running_dir)
+    vh = webserver_ops.for_engine("nginx").vhost_path(domain)
+    assert vh.exists()
+    content = vh.read_text()
+    assert f"root {webserver_ops.for_engine('nginx').root_path(domain)}/{running_dir};" in content

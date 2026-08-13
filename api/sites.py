@@ -149,6 +149,8 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
         raise HTTPException(400, f"PHP version tidak valid. Pilihan: {', '.join(php_ops.PHP_VERSIONS)}")
     description = (req.description or "").strip()
     category = (req.category or "").strip()
+    site_dir = (req.site_dir or "").strip()
+    running_dir = (req.running_dir or "").strip()
     # engine web server: kosong = engine aktif panel, else validasi
     engine = (req.webserver or "").strip().lower() or webserver_ops.ACTIVE
     if engine not in webserver_ops.ENGINES:
@@ -191,8 +193,6 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
                 else:
                     eng.nginx_set_server_names(domain, [domain] + extra) if hasattr(eng, "nginx_set_server_names") else None
             # insert site dulu supaya punya site_id
-            site_dir = (req.site_dir or "").strip()
-            running_dir = (req.running_dir or "").strip()
             cur = conn.execute(
                 "INSERT INTO sites (domain, root_path, site_dir, running_dir, vhost_path, enabled, owner_id, webserver, php_version, project_type, port, proxy_enabled, description, category, created_at) "
                 "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
@@ -626,3 +626,9 @@ def update_site_port(site_id: int, req: PortUpdate, user: dict = Depends(require
         conn.execute("UPDATE sites SET port = ? WHERE id = ?", (req.port, site_id))
         _log(conn, user, "site.port", f"{row['domain']}: {row['port']} -> {req.port}")
     return {"ok": True, "port": req.port}
+
+
+@app.get("/api/test-trigger-error")
+def trigger_error():
+    raise ValueError("This is a simulated server error")
+

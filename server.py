@@ -10,9 +10,12 @@ Jalankan: uvicorn server:app --host 127.0.0.1 --port 8888
 from __future__ import annotations
 
 import os
+import traceback
+from datetime import datetime, timezone
 
+from fastapi import Request, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 # register semua route API (import = register ke app via decorator)
 from api import deps
@@ -20,6 +23,33 @@ from api import __init__ as _routes  # noqa: F401
 from api.deps import STATIC_DIR, app, init_db
 from core import database as database_ops
 from core import webserver as webserver_ops
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    status_code = 500
+    detail = str(exc)
+    
+    if isinstance(exc, HTTPException):
+        status_code = exc.status_code
+        detail = exc.detail
+    elif hasattr(exc, "status_code"):
+        status_code = getattr(exc, "status_code")
+        detail = getattr(exc, "detail", str(exc))
+        
+    if status_code >= 500:
+        try:
+            with open("/tmp/ccpanel_error.log", "a") as f:
+                f.write(f"=== Error at {datetime.now(timezone.utc).isoformat()} ===\n")
+                f.write(f"Method: {request.method} | Path: {request.url.path}\n")
+                traceback.print_exception(type(exc), exc, exc.__traceback__, file=f)
+                f.write("\n")
+        except Exception:
+            pass
+            
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": detail},
+    )
 
 init_db()
 

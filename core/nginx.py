@@ -130,7 +130,7 @@ def _write_vhost(domain: str, root: Path, server_names: list[str] | None = None,
     vhost_path(domain).write_text(conf)
 
 
-def create_site(domain: str) -> Path:
+def create_site(domain: str, running_dir: str = "") -> Path:
     """Buat folder root + index default + vhost. Rollback penuh kalau nginx -t gagal.
 
     Folder root yang SUDAH ADA tidak pernah di-rmtree — cegah hapus data user
@@ -146,7 +146,7 @@ def create_site(domain: str) -> Path:
         raise NginxError(f"Folder root sudah ada: {root}") from None
     try:
         (root / "index.html").write_text(DEFAULT_INDEX.format(domain=domain))
-        _write_vhost(domain, root)
+        _write_vhost(domain, root, running_dir=running_dir)
         nginx_test()
     except Exception as e:
         # rollback: bersihkan config + folder (folder pasti buatan kita di sini)
