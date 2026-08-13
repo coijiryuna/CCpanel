@@ -241,9 +241,9 @@ systemctl --no-pager --lines=5 status ccpanel
 
 # Update admin password in database (in case admin user already exists)
 echo "==> Update admin password in database..."
-PANEL_PASSWORD="$PANEL_PASSWORD" $APP_DIR/.venv/bin/python3 -c "
+CCPANEL_DB_PATH="$APP_DIR/data/ccpanel.db" PANEL_PASSWORD="$PANEL_PASSWORD" $APP_DIR/.venv/bin/python3 -c "
 import bcrypt, sqlite3, os
-conn = sqlite3.connect('$APP_DIR/data/ccpanel.db')
+conn = sqlite3.connect(os.environ.get('CCPANEL_DB_PATH'))
 pw_hash = bcrypt.hashpw(os.environ.get('PANEL_PASSWORD', '').encode(), bcrypt.gensalt()).decode()
 conn.execute('UPDATE users SET password_hash = ? WHERE username = ?', (pw_hash, 'admin'))
 conn.commit()
