@@ -143,7 +143,8 @@ DEBIAN_FRONTEND=noninteractive apt install -y -o Dpkg::Options::="--force-confmi
 # --- Install Apache (backend port 8288) ---
 echo "==> Install Apache (backend port 8288)"
 apt install -y apache2
-apt install -y libapache2-mod-fcgid || echo "==> WARNING: libapache2-mod-fcgid could not be installed, skipping."# Disable default site, enable required modules
+apt install -y libapache2-mod-fcgid || echo "==> WARNING: libapache2-mod-fcgid could not be installed, skipping."
+# Disable default site, enable required modules
 a2dissite 000-default 2>/dev/null || true
 a2enmod proxy proxy_http proxy_fcgi rewrite headers remoteip deflate ssl 2>/dev/null || true
 # Configure Apache to listen on backend port 8288
@@ -240,9 +241,9 @@ systemctl --no-pager --lines=5 status ccpanel
 
 # Update admin password in database (in case admin user already exists)
 echo "==> Update admin password in database..."
-$APP_DIR/.venv/bin/python3 -c "
+PANEL_PASSWORD="$PANEL_PASSWORD" $APP_DIR/.venv/bin/python3 -c "
 import bcrypt, sqlite3, os
-conn = sqlite3.connect('/opt/ccpanel/data/ccpanel.db')
+conn = sqlite3.connect('$APP_DIR/data/ccpanel.db')
 pw_hash = bcrypt.hashpw(os.environ.get('PANEL_PASSWORD', '').encode(), bcrypt.gensalt()).decode()
 conn.execute('UPDATE users SET password_hash = ? WHERE username = ?', (pw_hash, 'admin'))
 conn.commit()
