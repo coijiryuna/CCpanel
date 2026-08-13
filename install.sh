@@ -142,8 +142,8 @@ DEBIAN_FRONTEND=noninteractive apt install -y nginx $PHP_PKGS python3-venv pytho
 
 # --- Install Apache (backend port 8288) ---
 echo "==> Install Apache (backend port 8288)"
-apt install -y apache2 libapache2-mod-fcgid
-# Disable default site, enable required modules
+apt install -y apache2
+apt install -y libapache2-mod-fcgid || echo "==> WARNING: libapache2-mod-fcgid could not be installed, skipping."# Disable default site, enable required modules
 a2dissite 000-default 2>/dev/null || true
 a2enmod proxy proxy_http proxy_fcgi rewrite headers remoteip deflate ssl 2>/dev/null || true
 # Configure Apache to listen on backend port 8288
