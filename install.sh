@@ -137,9 +137,7 @@ setup_php_repos
 
 echo "==> Install paket sistem ($PHP_PKGS)"
 # Install mariadb-server first with noninteractive to avoid update-alternatives error
-# Line 115 update:
 DEBIAN_FRONTEND=noninteractive apt install -y -o Dpkg::Options::="--force-confmiss" mariadb-server 2>/dev/null || true
-# Line 118 update:
 DEBIAN_FRONTEND=noninteractive apt install -y -o Dpkg::Options::="--force-confmiss" nginx $PHP_PKGS python3-venv python3-pip certbot python3-certbot-nginx
 
 # --- Install Apache (backend port 8288) ---
@@ -239,6 +237,18 @@ systemctl daemon-reload
 systemctl enable --now ccpanel
 sleep 2
 systemctl --no-pager --lines=5 status ccpanel
+
+# Update admin password in database (in case admin user already exists)
+echo "==> Update admin password in database..."
+$APP_DIR/.venv/bin/python3 -c "
+import bcrypt, sqlite3, os
+conn = sqlite3.connect('/opt/ccpanel/data/ccpanel.db')
+pw_hash = bcrypt.hashpw(os.environ.get('PANEL_PASSWORD', '').encode(), bcrypt.gensalt()).decode()
+conn.execute('UPDATE users SET password_hash = ? WHERE username = ?', (pw_hash, 'admin'))
+conn.commit()
+conn.close()
+print('Admin password updated in database')
+"
 
 # Sisa rahasia tak boleh di-echo penuh — tampilkan sekali lalu simpan
 echo ""
