@@ -16,6 +16,7 @@ os.environ["CCPANEL_LSWS_CONF_DIR"] = str(Path(_tmp) / "lsws")
 os.environ["CCPANEL_WAF_DIR"] = str(Path(_tmp) / "waf")
 os.environ["CCPANEL_HOTLINK_DIR"] = str(Path(_tmp) / "hotlink")
 os.environ["CCPANEL_SITEFEAT_DIR"] = str(Path(_tmp) / "sitefeat")
+os.environ["CCPANEL_FTP_CONF_DIR"] = str(Path(_tmp) / "vsftpd")
 # mock binary lshttpd supaya test litespeed tak butuh OpenLiteSpeed asli
 _lsws_bin = Path(_tmp) / "lsws-bin"
 _lsws_bin.mkdir(parents=True, exist_ok=True)
@@ -31,7 +32,7 @@ for v in ("8.1", "8.2", "8.3", "8.4"):
 # mock nginx + apachectl + systemctl supaya test vhost tak butuh service asli
 _nginx_bin = Path(_tmp) / "nginx-bin"
 _nginx_bin.mkdir(parents=True, exist_ok=True)
-for b in ("nginx", "apachectl"):
+for b in ("nginx", "apachectl", "db_load", "mysql"):
     (_nginx_bin / b).write_text("#!/bin/sh\nexit 0\n")
     (_nginx_bin / b).chmod(0o755)
 os.environ["PATH"] = f"{_php_bin}:{_lsws_bin}:{_nginx_bin}:" + os.environ.get("PATH", "")

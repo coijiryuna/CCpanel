@@ -223,6 +223,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE sites ADD COLUMN description TEXT NOT NULL DEFAULT ''")
         if "category" not in scols:
             conn.execute("ALTER TABLE sites ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+        if "site_dir" not in scols:
+            conn.execute("ALTER TABLE sites ADD COLUMN site_dir TEXT NOT NULL DEFAULT ''")
+        if "running_dir" not in scols:
+            conn.execute("ALTER TABLE sites ADD COLUMN running_dir TEXT NOT NULL DEFAULT ''")
         dcols = [r[1] for r in conn.execute("PRAGMA table_info(dbs)").fetchall()]
         if "owner_id" not in dcols:
             conn.execute("ALTER TABLE dbs ADD COLUMN owner_id INTEGER REFERENCES users(id)")

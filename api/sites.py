@@ -211,10 +211,11 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
             if req.create_ftp:
                 username = (req.ftp_username or "").strip() or domain.split(".")[0]
                 password = (req.ftp_password or "").strip() or secrets.token_urlsafe(12)
-                ftp_created = ftp_ops.create_account(username, password, site_id)
+                ftp_ops.create_account(username, password, site_id)
+                ftp_created = True
                 conn.execute(
-                    "INSERT INTO ftp_accounts (site_id, username, password, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (site_id, username, password, ftp_created, datetime.now(timezone.utc).isoformat()),
+                    "INSERT INTO ftp_accounts (site_id, username, password, created_at) VALUES (?, ?, ?, ?)",
+                    (site_id, username, password, datetime.now(timezone.utc).isoformat()),
                 )
             if req.create_db:
                 db_name = (req.db_name or "").strip().lower() or domain.replace(".", "_")
@@ -248,7 +249,7 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
                 conn.execute("DELETE FROM dbs WHERE site_id = ?", (site_id,))
             if ftp_created:
                 try:
-                    ftp_ops.delete_account(req.ftp_username.strip() or domain.split(".")[0])
+                    ftp_ops.delete_account((req.ftp_username or "").strip() or domain.split(".")[0])
                 except Exception:
                     pass
             if db_created:
