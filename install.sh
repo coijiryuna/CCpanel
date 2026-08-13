@@ -147,10 +147,17 @@ apt install -y libapache2-mod-fcgid || echo "==> WARNING: libapache2-mod-fcgid c
 # Disable default site, enable required modules
 a2dissite 000-default 2>/dev/null || true
 a2enmod proxy proxy_http proxy_fcgi rewrite headers remoteip deflate ssl 2>/dev/null || true
-# Configure Apache to listen on backend port 8288
+# Configure Apache to listen ONLY on backend port 8288 (not 80)
+# Remove any existing Listen 80 or Listen 443
+sed -i '/^Listen 80$/d' /etc/apache2/ports.conf
+sed -i '/^Listen 443$/d' /etc/apache2/ports.conf
 if ! grep -q "^Listen 8288" /etc/apache2/ports.conf; then
   echo "Listen 8288" >> /etc/apache2/ports.conf
 fi
+# Also check /etc/apache2/ports.conf for any Listen 80 in IncludeOptional
+# Disable default site completely (it listens on 80)
+a2dissite 000-default 2>/dev/null || true
+rm -f /etc/apache2/sites-enabled/000-default.conf 2>/dev/null || true
 # Create Apache vhost directory for panel
 mkdir -p /etc/apache2/sites-available /etc/apache2/sites-enabled
 mkdir -p /www/server/panel/vhost/apache/extension
@@ -176,6 +183,7 @@ mkdir -p /usr/local/lsws/conf/vhosts
 mkdir -p /www/server/panel/vhost/litespeed/extension
 
 # Enable and start Apache and OpenLiteSpeed services
+# Apache is configured to listen only on 8288 (not 80), so it won't conflict with nginx
 systemctl enable --now apache2 2>/dev/null || true
 systemctl enable --now lsws 2>/dev/null || true
 

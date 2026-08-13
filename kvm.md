@@ -23,7 +23,7 @@ ssh debianserver@localhost -p 2222
 
 ==================================================
 Selesai. Panel jalan: http://127.0.0.1:8888
-Login: admin / EhcrlpHJuG0qDR7xXi+2Db3FnIqIXJ51
+Login: admin / 5fENuaPvzoJy5PZvlpuK/UkxeGrgj7IU
 Credential tersimpan di /etc/ccpanel.env (mode 600)
 ==================================================
 Akses remote via SSH tunnel:
