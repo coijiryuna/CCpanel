@@ -213,6 +213,7 @@ EOF
 chmod 600 /etc/ccpanel.env
 
 # Unit systemd (ditulis langsung — tak bergantung file scripts/ccpanel.service)
+# Bind ke 0.0.0.0 agar bisa diakses via QEMU port forwarding / SSH tunnel
 cat > /etc/systemd/system/ccpanel.service <<EOF
 [Unit]
 Description=CCPanel
@@ -221,7 +222,7 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/ccpanel.env
-ExecStart=$APP_DIR/.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8888
+ExecStart=$APP_DIR/.venv/bin/uvicorn server:app --host 0.0.0.0 --port 8888
 WorkingDirectory=$APP_DIR
 Restart=always
 RestartSec=3

@@ -22,17 +22,16 @@ ssh debianserver@localhost -p 2222
 
 
 ==================================================
-Selesai. Panel jalan: http://127.0.0.1:8888
-Login: admin / R6Zed0SPO7sRUP7QVBsRL9iSAE4ziWQs
+Selesai. Panel jalan: http://localhost:8888  (dari host laptop via QEMU port forwarding)
+Login: admin / <password dari output install>
 Credential tersimpan di /etc/ccpanel.env (mode 600)
 ==================================================
-Akses remote via SSH tunnel:
+Akses remote via SSH tunnel (VPS production):
   ssh -L 8888:127.0.0.1:8888 user@vps-ip
 
-apt update && apt install -y sudo curl
+# Install di VM (fresh install dengan --fresh):
+apt update && apt install -y sudo curl git
 usermod -aG sudo debianserver
-
-
-curl -fsSL "https://raw.githubusercontent.com/coijiryuna/CCpanel/main/install.sh?cb=$(date +%s)" | sudo bash
-
-curl -fsSL "https://raw.githubusercontent.com/coijiryuna/CCpanel/main/install.sh?x=$(date +%s)" | sudo bash
+git clone https://github.com/coijiryuna/CCpanel.git
+cd CCpanel
+sudo bash install.sh --fresh
