@@ -135,7 +135,10 @@ esac
 setup_php_repos
 
 echo "==> Install paket sistem ($PHP_PKGS)"
-apt install -y nginx mariadb-server $PHP_PKGS python3-venv python3-pip certbot python3-certbot-nginx
+# Install mariadb-server first with noninteractive to avoid update-alternatives error
+DEBIAN_FRONTEND=noninteractive apt install -y mariadb-server 2>/dev/null || true
+# Then install the rest
+DEBIAN_FRONTEND=noninteractive apt install -y nginx $PHP_PKGS python3-venv python3-pip certbot python3-certbot-nginx
 
 # --- Install Apache (backend port 8288) ---
 echo "==> Install Apache (backend port 8288)"
