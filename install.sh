@@ -38,20 +38,20 @@ if [ "$FRESH_INSTALL" = true ]; then
   systemctl stop php8.3-fpm 2>/dev/null || true
   systemctl stop php8.4-fpm 2>/dev/null || true
   
-  # Remove packages
-  apt remove -y nginx nginx-common nginx-core 2>/dev/null || true
-  apt remove -y apache2 apache2-bin apache2-data apache2-utils 2>/dev/null || true
-  apt remove -y openlitespeed lsphp* 2>/dev/null || true
-  apt remove -y mariadb-server mariadb-client mariadb-common 2>/dev/null || true
-  apt remove -y mysql-server mysql-client mysql-common 2>/dev/null || true
-  apt remove -y php8.1-fpm php8.2-fpm php8.3-fpm php8.4-fpm 2>/dev/null || true
-  apt remove -y php8.1-cli php8.2-cli php8.3-cli php8.4-cli 2>/dev/null || true
-  apt remove -y php8.1-common php8.2-common php8.3-common php8.4-common 2>/dev/null || true
-  apt remove -y certbot python3-certbot-nginx 2>/dev/null || true
+  # Purge packages (remove config files too) - mariadb first to avoid update-alternatives error
+  DEBIAN_FRONTEND=noninteractive apt purge -y mariadb-server mariadb-client mariadb-common 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive apt purge -y mysql-server mysql-client mysql-common 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive apt purge -y nginx nginx-common nginx-core 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive apt purge -y apache2 apache2-bin apache2-data apache2-utils 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive apt purge -y openlitespeed lsphp* 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive apt purge -y php8.1-fpm php8.2-fpm php8.3-fpm php8.4-fpm 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive apt purge -y php8.1-cli php8.2-cli php8.3-cli php8.4-cli 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive apt purge -y php8.1-common php8.2-common php8.3-common php8.4-common 2>/dev/null || true
+  DEBIAN_FRONTEND=noninteractive apt purge -y certbot python3-certbot-nginx 2>/dev/null || true
   apt autoremove -y 2>/dev/null || true
   apt autoclean 2>/dev/null || true
   
-  # Remove config directories
+  # Remove config directories (after purge)
   rm -rf /etc/nginx /etc/apache2 /usr/local/lsws /etc/mysql /etc/php 2>/dev/null || true
   rm -rf /www/wwwroot /www/trash /www/project /www/wwwlogs /www/server 2>/dev/null || true
   rm -f /etc/ccpanel.env 2>/dev/null || true
