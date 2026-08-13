@@ -52,10 +52,9 @@ if [ "$FRESH_INSTALL" = true ]; then
   apt autoclean 2>/dev/null || true
   
   # Remove config directories (after purge)
-  rm -rf /etc/apache2 /usr/local/lsws /etc/mysql /etc/php 2>/dev/null || true
-  # Do not rm -rf /etc/nginx completely; clean site configs only if needed:
+  rm -rf /etc/apache2 /usr/local/lsws /etc/php 2>/dev/null || true
   rm -rf /etc/nginx/sites-enabled/* /etc/nginx/conf.d/* 2>/dev/null || true
-  rm -rf /www/wwwroot /www/trash /www/project /www/wwwlogs /www/server 2>/dev/null || true
+  rm -rf /etc/mysql/mariadb.conf.d/* 2>/dev/null || true  rm -rf /www/wwwroot /www/trash /www/project /www/wwwlogs /www/server 2>/dev/null || true
   rm -f /etc/ccpanel.env 2>/dev/null || true
   systemctl daemon-reload
   
@@ -138,9 +137,11 @@ setup_php_repos
 
 echo "==> Install paket sistem ($PHP_PKGS)"
 # Install mariadb-server first with noninteractive to avoid update-alternatives error
-DEBIAN_FRONTEND=noninteractive apt install -y mariadb-server 2>/dev/null || true
-# Then install the rest
+# Line 115 update:
+DEBIAN_FRONTEND=noninteractive apt install -y -o Dpkg::Options::="--force-confmiss" mariadb-server 2>/dev/null || true
+# Line 118 update:
 DEBIAN_FRONTEND=noninteractive apt install -y -o Dpkg::Options::="--force-confmiss" nginx $PHP_PKGS python3-venv python3-pip certbot python3-certbot-nginx
+
 # --- Install Apache (backend port 8288) ---
 echo "==> Install Apache (backend port 8288)"
 apt install -y apache2
