@@ -44,7 +44,7 @@ VHOST_TEMPLATE = """server {{
     #ERROR-PAGE-END
 
     #PHP-INFO-START PHP reference configuration, allowed to be commented, deleted or modified
-    include enable-php-00.conf;
+    #include enable-php-00.conf;
     #PHP-INFO-END
 
     #REWRITE-START URL rewrite rule reference, any modification will invalidate the rewrite rules set by the panel

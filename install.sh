@@ -203,7 +203,7 @@ python3 -m venv .venv
 ## Tidak perlu karena sudah build static
 
 echo "==> Folder website + trash + project + logs"
-mkdir -p /www/wwwroot /www/trash /www/project /www/wwwlogs
+mkdir -p /www/wwwroot /www/trash /www/project /www/wwwlogs /etc/nginx/conf.d
 
 echo "==> Systemd service + env"
 # Upgrade: pakai credential lama kalau ada (jangan generate ulang)

@@ -6,7 +6,9 @@ WWW_ROOT/TRASH_DIR + trash items di-share dari core/nginx.
 """
 from __future__ import annotations
 
+import grp
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -93,6 +95,36 @@ def vhost_path(domain: str) -> Path:
 def root_path(domain: str) -> Path:
     return WWW_ROOT / domain
 
+def _get_web_user_uid_gid() -> tuple[int, int]:
+    """Get uid/gid for web user (www atau www-data). Apache requires UID >= 11, GID >= 10."""
+    for user in ("www-data", "www"):
+        try:
+            pw = pwd.getpwnam(user)
+            gr = grp.getgrgid(pw.pw_gid)
+            if pw.pw_uid >= 11 and gr.gr_gid >= 10:
+                return pw.pw_uid, gr.gr_gid
+        except KeyError:
+            continue
+    # Fallback: use first available user with uid >= 11
+    try:
+        for i in range(11, 100):
+            try:
+                pw = pwd.getpwuid(i)
+                gr = grp.getgrgid(pw.pw_gid)
+                if gr.gr_gid >= 10:
+                    return i, gr.gr_gid
+            except KeyError:
+                continue
+    except Exception:
+        pass
+    # Last resort: use www-data or www if available
+    for user in ("www-data", "www"):
+        try:
+            pw = pwd.getpwnam(user)
+            return pw.pw_uid, pw.pw_gid
+        except KeyError:
+            continue
+    raise WebserverError("Cannot find suitable web user for directory ownership (uid >= 11, gid >= 10)")
 
 def nginx_test() -> None:
     res = _run(["apachectl", "-t"])
@@ -186,6 +218,14 @@ def create_site(domain: str, running_dir: str = "") -> Path:
         raise WebserverError(f"Folder root sudah ada: {root}")
     try:
         root.mkdir(parents=True, exist_ok=False)
+        # Set proper ownership: Apache requires uid >= 11 and gid >= 10
+        try:
+            uid, gid = _get_web_user_uid_gid()
+            os.chown(root, uid, gid)
+        except (PermissionError, OSError):
+            # In test/dev environment may not have chown permission — continue anyway
+            # In production, this should succeed if running as root
+            pass
     except FileExistsError:
         raise WebserverError(f"Folder root sudah ada: {root}") from None
     try:
