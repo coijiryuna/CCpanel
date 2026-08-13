@@ -43,7 +43,7 @@ SERVICE_ACTIONS = {"start", "stop", "restart", "reload"}
 # Bisa di-override env utk testing.
 SBIN_DIRS = [
     Path(d) for d in os.environ.get(
-        "CCPANEL_SBIN_DIRS", "/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin"
+        "CCPANEL_SBIN_DIRS", "/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/local/lsws/bin"
     ).split(":") if d
 ]
 
