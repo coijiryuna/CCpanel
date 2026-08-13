@@ -267,6 +267,14 @@ def create_site(domain: str, running_dir: str = "") -> Path:
         try:
             uid, gid = _get_web_user_uid_gid()
             os.chown(root, uid, gid)
+            # Also fix parent directories if needed (recursively up to WWW_ROOT)
+            parent = root.parent
+            while parent != WWW_ROOT.parent and parent.exists():
+                try:
+                    os.chown(parent, uid, gid)
+                except (PermissionError, OSError):
+                    pass
+                parent = parent.parent
         except (PermissionError, OSError):
             # In test/dev environment may not have chown permission — continue anyway
             # In production, this should succeed if running as root
@@ -300,6 +308,30 @@ def activate_site(domain: str, running_dir: str = "") -> None:
         vhost_path(domain).unlink(missing_ok=True)
         raise
     nginx_reload()
+
+
+def fix_vhost_ownership(domain: str) -> None:
+    """Fix directory ownership for existing vhost (uid >= 11, gid >= 10).
+    
+    Use this to fix LiteSpeed warnings on existing vhosts that were created
+    with root ownership. Requires running as root or with sufficient privileges.
+    """
+    root = root_path(domain)
+    if not root.is_dir():
+        raise WebserverError(f"Folder root tidak ada: {root}")
+    try:
+        uid, gid = _get_web_user_uid_gid()
+        os.chown(root, uid, gid)
+        # Also fix nested directories recursively
+        for dirpath, dirnames, filenames in os.walk(root):
+            for dirname in dirnames:
+                full_path = os.path.join(dirpath, dirname)
+                try:
+                    os.chown(full_path, uid, gid)
+                except (PermissionError, OSError):
+                    pass
+    except (PermissionError, OSError) as e:
+        raise WebserverError(f"fix_vhost_ownership failed (requires root): {e}") from e
 
 
 def set_enabled(domain: str, enabled: bool) -> None:

@@ -339,6 +339,23 @@ def enable_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
 def disable_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
     return _set_enabled(site_id, False, user)
 
+@app.post("/api/sites/{site_id}/fix-ownership")
+def fix_site_ownership(site_id: int, user: dict = Depends(require_auth)) -> dict:
+    """Fix directory ownership for vhost (uid >= 11, gid >= 10).
+    
+    Use this to fix LiteSpeed/Apache warnings on existing vhosts that were
+    created with root ownership. Requires running as root.
+    """
+    with get_db() as conn:
+        row = check_site_access(conn, site_id, user)
+        eng = webserver_ops.for_engine(row["webserver"])
+        try:
+            eng.fix_vhost_ownership(row["domain"])
+        except (AttributeError, webserver_ops.WebserverError) as e:
+            raise HTTPException(500, f"Failed to fix ownership: {str(e)}") from e
+        _log(conn, user, "site.fix_ownership", row["domain"])
+    return {"ok": True, "message": "Vhost ownership fixed"}
+
 def _set_enabled(site_id: int, enabled: bool, user: dict) -> dict:
     with get_db() as conn:
         row = check_site_access(conn, site_id, user)
