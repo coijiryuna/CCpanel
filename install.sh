@@ -153,11 +153,19 @@ mkdir -p /www/server/panel/vhost/apache/extension
 
 # --- Install OpenLiteSpeed (backend port 8188) ---
 echo "==> Install OpenLiteSpeed (backend port 8188)"
-# Add OpenLiteSpeed repo
+# Add OpenLiteSpeed repo (manual — script resmi kadang gagal di Debian baru)
 if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ] || [ "$ID" = "linuxmint" ]; then
-  wget -qO - https://rpms.litespeedtech.com/debian/enable_lst_debian_repo.sh | bash 2>/dev/null || true
-  apt update
-  apt install -y openlitespeed lsphp81 lsphp82 lsphp83 lsphp84 2>/dev/null || apt install -y openlitespeed
+  if [ ! -f /etc/apt/sources.list.d/lst_debian_repo.list ]; then
+    wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg https://rpms.litespeedtech.com/debian/lst_debian_repo.gpg 2>/dev/null || true
+    echo "deb https://rpms.litespeedtech.com/debian $VERSION_CODENAME main" > /etc/apt/sources.list.d/lst_debian_repo.list
+    apt update 2>/dev/null || true
+  fi
+  # OLS optional — kalau gagal install, panel tetap jalan (backend engine saja)
+  if apt-cache show openlitespeed >/dev/null 2>&1; then
+    apt install -y openlitespeed lsphp81 lsphp82 lsphp83 lsphp84 2>/dev/null || apt install -y openlitespeed 2>/dev/null || true
+  else
+    echo "==> WARNING: openlitespeed tidak tersedia di repo — lewati (backend OLS nonaktif)"
+  fi
 fi
 # Create OLS vhost directory for panel
 mkdir -p /usr/local/lsws/conf/vhosts

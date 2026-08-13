@@ -29,4 +29,10 @@ Credential tersimpan di /etc/ccpanel.env (mode 600)
 Akses remote via SSH tunnel:
   ssh -L 8888:127.0.0.1:8888 user@vps-ip
 
+apt update && apt install -y sudo curl
+usermod -aG sudo debianserver
+
+
 curl -fsSL "https://raw.githubusercontent.com/coijiryuna/CCpanel/main/install.sh?cb=$(date +%s)" | sudo bash
+
+curl -fsSL "https://raw.githubusercontent.com/coijiryuna/CCpanel/main/install.sh?x=$(date +%s)" | sudo bash
