@@ -94,7 +94,7 @@ def dt_order(columns: list[str], order_col: str | None = None, order_dir: str = 
 def init_db() -> None:
     _data_dir().mkdir(parents=True, exist_ok=True)
     with closing(get_db()) as conn:
-        conn.executescript(
+        next(conn).executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -204,9 +204,9 @@ def init_db() -> None:
             """
         )
         # migrasi: DB lama belum punya kolom baru
-        ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+        ucols = [r[1] for r in next(conn).execute("PRAGMA table_info(users)").fetchall()]
         if "role" not in ucols:
-            conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'client'")
+            next(conn).execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'client'")
             conn.execute("UPDATE users SET role = 'admin' WHERE username = 'admin'")
         scols = [r[1] for r in conn.execute("PRAGMA table_info(sites)").fetchall()]
         if "waf_enabled" not in scols:
