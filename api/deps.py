@@ -12,6 +12,7 @@ import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Generator
 
 import bcrypt
 import jwt
@@ -30,7 +31,7 @@ JWT_EXPIRES_HOURS = 12
 app = FastAPI(title="CCPanel", docs_url=None, redoc_url=None)
 bearer = HTTPBearer(auto_error=False)
 
-from typing import Generator
+from contextlib import closing
 
 # ------------------------------------------------------------------ database
 def _data_dir() -> Path:
@@ -92,7 +93,7 @@ def dt_order(columns: list[str], order_col: str | None = None, order_dir: str = 
 
 def init_db() -> None:
     _data_dir().mkdir(parents=True, exist_ok=True)
-    with get_db() as conn:
+    with closing(get_db()) as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
