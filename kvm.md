@@ -5,8 +5,6 @@ kvm-ok || lscpu | grep Virtualization
 sudo usermod -aG kvm,libvirt $USER
 qemu-img create -f qcow2 server-test.qcow2 20G
 
-
-
 qemu-system-x86_64 -enable-kvm -m 2G -smp 2 \
 -hda server-test.qcow2 \
 -cdrom /home/coijiryuna/Downloads/debian-minimal.iso \
@@ -23,7 +21,7 @@ ssh debianserver@localhost -p 2222
 
 ==================================================
 Selesai. Panel jalan: http://127.0.0.1:8888
-Login: admin / 5fENuaPvzoJy5PZvlpuK/UkxeGrgj7IU
+Login: admin / D3FfuV/+OCPjRoJiWSJzQLJ3wRfDGqPN
 Credential tersimpan di /etc/ccpanel.env (mode 600)
 ==================================================
 Akses remote via SSH tunnel:

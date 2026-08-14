@@ -109,12 +109,20 @@ def _install_deps(app_type: str, root: Path, run_user: str, node_version: str = 
         pkg = _read_json(root / "package.json")
         if not pkg or not (pkg.get("dependencies") or pkg.get("devDependencies")):
             return
-        env = _node_env_prefix(node_version)
         lock = root / "package-lock.json"
-        npm = "npm ci" if lock.exists() else "npm install"
-        res = _run_in(["bash", "-lc", f"cd {root} && {env} {npm}"], root, timeout=900, as_www=True)
+        npm_command = "npm ci" if lock.exists() else "npm install"
+        # NVM setup and npm install
+        nvm_cmd = f"""
+            export NVM_DIR="$HOME/.nvm" &&
+            [ -s "$NVM_DIR/nvm.sh" ] && \\. "$NVM_DIR/nvm.sh" && # This loads nvm
+            nvm install {node_version} && # Install if not present
+            nvm use {node_version} && # Use the version
+            cd {root} &&
+            {npm_command}
+        """
+        res = _run_in(["bash", "-lc", nvm_cmd], root, timeout=900, as_www=True)
         if res.returncode != 0:
-            raise AppError(res.stderr.strip() or f"{npm} gagal")
+            raise AppError(res.stderr.strip() or f"{npm_command} gagal")
     elif app_type == "python":
         req = root / "requirements.txt"
         if not req.exists():

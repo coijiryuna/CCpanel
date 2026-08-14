@@ -174,6 +174,10 @@ def set_php_version(domain: str, old_version: str, new_version: str, vhost: Path
     if old_version != "static" and old_version in PHP_VERSIONS:
         remove_pool(domain, old_version)
 
+    # Ensure any existing pool for new_version is removed before creation
+    if new_version != "static" and new_version in PHP_VERSIONS:
+        remove_pool(domain, new_version) # Add this line
+
     # Create new pool if not static
     if new_version != "static" and new_version in PHP_VERSIONS:
         create_pool(domain, new_version)
