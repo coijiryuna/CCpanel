@@ -33,7 +33,9 @@ class AppError(Exception):
     pass
 
 
-def _run(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], timeout: int = 30, as_www: bool = False) -> subprocess.CompletedProcess:
+    if as_www:
+        cmd = ["sudo", "-u", DEFAULT_USER] + cmd
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError:
@@ -41,8 +43,10 @@ def _run(cmd: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
     except subprocess.TimeoutExpired as e:
         raise AppError(f"Timeout: {' '.join(cmd)}") from e
 
-def _run_in(cmd: list[str], cwd: Path, timeout: int = 600) -> subprocess.CompletedProcess:
+def _run_in(cmd: list[str], cwd: Path, timeout: int = 600, as_www: bool = False) -> subprocess.CompletedProcess:
     """Jalankan perintah di folder project (install deps dll, lama)."""
+    if as_www:
+        cmd = ["sudo", "-u", DEFAULT_USER] + cmd
     try:
         return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError:
@@ -108,7 +112,7 @@ def _install_deps(app_type: str, root: Path, run_user: str, node_version: str = 
         env = _node_env_prefix(node_version)
         lock = root / "package-lock.json"
         npm = "npm ci" if lock.exists() else "npm install"
-        res = _run_in(["bash", "-lc", f"cd {root} && {env} {npm}"], root, timeout=900)
+        res = _run_in(["bash", "-lc", f"cd {root} && {env} {npm}"], root, timeout=900, as_www=True)
         if res.returncode != 0:
             raise AppError(res.stderr.strip() or f"{npm} gagal")
     elif app_type == "python":
@@ -118,18 +122,18 @@ def _install_deps(app_type: str, root: Path, run_user: str, node_version: str = 
         # cek venv project dulu, fallback pip
         venv_pip = root / ".venv" / "bin" / "pip"
         cmd = [str(venv_pip), "install", "-r", str(req)] if venv_pip.exists() else ["pip", "install", "-r", str(req)]
-        res = _run_in(cmd, root, timeout=900)
+        res = _run_in(cmd, root, timeout=900, as_www=True)
         if res.returncode != 0:
             raise AppError(res.stderr.strip() or "pip install -r requirements.txt gagal")
     elif app_type == "go":
         if not (root / "go.mod").exists():
             return
         if (root / "go.sum").exists():
-            res = _run_in(["go", "mod", "download"], root, timeout=900)
+            res = _run_in(["go", "mod", "download"], root, timeout=900, as_www=True)
             if res.returncode != 0:
                 raise AppError(res.stderr.strip() or "go mod download gagal")
         bin_name = root.name
-        res = _run_in(["go", "build", "-o", bin_name, "."], root, timeout=900)
+        res = _run_in(["go", "build", "-o", bin_name, "."], root, timeout=900, as_www=True)
         if res.returncode != 0:
             raise AppError(res.stderr.strip() or "go build gagal")
 

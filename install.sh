@@ -205,6 +205,23 @@ python3 -m venv .venv
 echo "==> Folder website + trash + project + logs"
 mkdir -p /www/wwwroot /www/trash /www/project /www/wwwlogs /etc/nginx/conf.d
 
+# Create www user and group if they don't exist
+if ! getent group www > /dev/null; then
+  groupadd www
+fi
+if ! getent passwd www > /dev/null; then
+  useradd -r -g www -s /sbin/nologin www
+fi
+
+# Set ownership for /www directory
+chown -R www:www /www
+
+# Install sudo
+apt install -y sudo
+
+# Add www user to sudoers (no password)
+echo "www ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
 echo "==> Systemd service + env"
 # Upgrade: pakai credential lama kalau ada (jangan generate ulang)
 if [ -f /etc/ccpanel.env ]; then

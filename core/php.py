@@ -85,11 +85,11 @@ def php_fpm_reload(php_version: str) -> None:
         raise PhpError(res.stderr.strip() or f"systemctl reload php{php_version[3:]}-fpm failed")
 
 POOL_TEMPLATE = """[{domain}]
-user = www-data
-group = www-data
+user = www
+group = www
 listen = /run/php/php{php_version_short}-fpm-{domain}.sock
-listen.owner = www-data
-listen.group = www-data
+listen.owner = www
+listen.group = www
 pm = dynamic
 pm.max_children = 5
 pm.start_servers = 2
