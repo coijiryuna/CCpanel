@@ -40,6 +40,13 @@ vhDomain                  {domain}
 enableGzip                1
 enableIpGeo               1
 
+# Security Headers
+header_out X-Frame-Options "SAMEORIGIN"
+header_out X-Content-Type-Options "nosniff"
+header_out X-XSS-Protection "1; mode=block"
+header_out Referrer-Policy "no-referrer-when-downgrade"
+header_out Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
 index  {{
     useServer               0
     indexFiles              index.php,index.html,index.htm

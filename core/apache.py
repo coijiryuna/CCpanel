@@ -57,6 +57,13 @@ VHOST_TEMPLATE = """<VirtualHost *:{port}>
     ErrorLog "/www/wwwlogs/{domain}-error_log"
     CustomLog "/www/wwwlogs/{domain}-access_log" combined
 
+    # Security Headers
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "no-referrer-when-downgrade"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
     #DENY FILES
      <Files ~ (\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md)$>
        Order allow,deny

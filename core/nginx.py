@@ -24,6 +24,13 @@ VHOST_TEMPLATE = """server {{
 
     server_name {server_name};
 
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Referrer-Policy "no-referrer-when-downgrade";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+
     index index.php index.html index.htm default.php default.htm default.html;
 
     root {root};
