@@ -264,6 +264,9 @@ systemctl enable --now ccpanel
 sleep 2
 systemctl --no-pager --lines=5 status ccpanel
 
+# Stop service before DB operations
+systemctl stop ccpanel || true
+
 # Update admin password in database (in case admin user already exists)
 echo "==> Update admin password in database..."
 CCPANEL_DB_PATH="$APP_DIR/data/ccpanel.db" PANEL_PASSWORD="$PANEL_PASSWORD" $APP_DIR/.venv/bin/python3 -c "
@@ -275,6 +278,9 @@ conn.commit()
 conn.close()
 print('Admin password updated in database')
 "
+
+# Restart service after DB operations
+systemctl restart ccpanel
 
 # Sisa rahasia tak boleh di-echo penuh — tampilkan sekali lalu simpan
 echo ""
