@@ -167,17 +167,22 @@ echo "==> Install OpenLiteSpeed (backend port 8188)"
 # Add OpenLiteSpeed repo (manual — script resmi kadang gagal di Debian baru)
 if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ] || [ "$ID" = "linuxmint" ]; then
   if [ ! -f /etc/apt/sources.list.d/lst_debian_repo.list ]; then
-    # Use the official LiteSpeed repo script for better compatibility
-    sudo wget -O - https://repo.litespeed.sh | sudo bash
-    apt update 2>/dev/null || true
+    # 1. Download and save the LiteSpeed repository GPG key
+    sudo wget -O /usr/share/keyrings/litespeed-archive-keyring.gpg https://rpms.litespeedtech.com/debian/lst_repo.gpg
+    # 2. Add the repository explicitly referencing the downloaded key
+    echo "deb [signed-by=/usr/share/keyrings/litespeed-archive-keyring.gpg] https://rpms.litespeedtech.com/debian/ $VERSION_CODENAME main" | sudo tee /etc/apt/sources.list.d/lst_debian_repo.list
+    # 3. Update APT package lists
+    sudo apt update 2>/dev/null || true
   fi
   # OLS optional — kalau gagal install, panel tetap jalan (backend engine saja)
   if apt-cache show openlitespeed >/dev/null 2>&1; then
     # Install lsphp based on detected PHP_PKGS
     LS_PHP_PKGS=""
     for pkg in $PHP_PKGS; do
-      if [[ $pkg =~ lsphp([0-9]+\.[0-9]+)-fpm ]]; then
-        LS_PHP_PKGS+="lsphp${BASH_REMATCH[1]} lsphp${BASH_REMATCH[1]}-common lsphp${BASH_REMATCH[1]}-mysql "
+      # Extract major.minor version from phpX.Y-fpm
+      if [[ $pkg =~ php([0-9]+\.[0-9]+)-fpm ]]; then
+        PHP_VERSION_SHORT="${BASH_REMATCH[1]//./}" # e.g., 8.1 -> 81
+        LS_PHP_PKGS+="lsphp${PHP_VERSION_SHORT} lsphp${PHP_VERSION_SHORT}-common lsphp${PHP_VERSION_SHORT}-mysql "
       fi
     done
     apt install -y openlitespeed $LS_PHP_PKGS 2>/dev/null || apt install -y openlitespeed 2>/dev/null || true
