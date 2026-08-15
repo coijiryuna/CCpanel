@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException
+from fastapi.requests import Request
 
 from core import php as php_ops
 from core import siteconfig as siteconfig_ops

@@ -16,7 +16,8 @@ from typing import Generator
 
 import bcrypt
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.requests import Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core import apps as apps_ops
