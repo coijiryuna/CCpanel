@@ -197,7 +197,7 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
                 "INSERT INTO sites (domain, root_path, site_dir, running_dir, vhost_path, enabled, owner_id, webserver, php_version, project_type, port, proxy_enabled, description, category, created_at) "
                 "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
                 (domain, str(root), site_dir, running_dir, str(eng.vhost_path(domain)),
-                 None if user["role"] == "admin" else user["id"],
+                 user["id"] if user["role"] != "admin" else None,
                  engine, php_version, ptype, port,
                  description, category,
                  datetime.now(timezone.utc).isoformat()),

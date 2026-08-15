@@ -118,32 +118,28 @@ def root_path(domain: str) -> Path:
 
 def _get_web_user_uid_gid() -> tuple[int, int]:
     """Get uid/gid for web user (www atau www-data). LiteSpeed requires UID >= 11, GID >= 10."""
-    for user in ("www", "www-data"):
+    # First, check common web server users
+    for user_name in ("www-data", "www"):
         try:
-            pw = pwd.getpwnam(user)
+            pw = pwd.getpwnam(user_name)
             gr = grp.getgrgid(pw.pw_gid)
             if pw.pw_uid >= 11 and gr.gr_gid >= 10:
                 return pw.pw_uid, gr.gr_gid
         except KeyError:
-            continue
-    # Fallback: use first available user with uid >= 11
-    try:
-        for i in range(11, 100):
-            try:
-                pw = pwd.getpwuid(i)
-                gr = grp.getgrgid(pw.pw_gid)
-                if gr.gr_gid >= 10:
-                    return i, gr.gr_gid
-            except KeyError:
-                continue
-    except Exception:
-        pass
-    # Last resort: use www:www if available
-    try:
-        pw = pwd.getpwnam("www")
-        return pw.pw_uid, pw.pw_gid
-    except KeyError:
-        raise WebserverError("Cannot find suitable web user for directory ownership (uid >= 11, gid >= 10)")
+            pass # User not found, try next
+
+    # If common users don't fit, search for any user with appropriate UID/GID
+    for pw in pwd.getpwall():
+        try:
+            gr = grp.getgrgid(pw.pw_gid)
+            if pw.pw_uid >= 11 and gr.gr_gid >= 10:
+                return pw.pw_uid, gr.gr_gid
+        except KeyError:
+            pass # Group not found, skip
+
+    raise WebserverError("Cannot find suitable web user for directory ownership (uid >= 11, gid >= 10). "
+                         "Please ensure a user with UID >= 11 and GID >= 10 exists, "
+                         "or create 'www' or 'www-data' with these properties.")
 
 
 def nginx_test() -> None:

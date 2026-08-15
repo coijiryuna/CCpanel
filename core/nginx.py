@@ -60,7 +60,7 @@ VHOST_TEMPLATE = """server {{
 
     # Forbidden files or directories
     location ~ ^/(\\.user.ini|\\.htaccess|\\.git|\\.env|\\.svn|\\.project|LICENSE|README.md) {{
-        return 404;
+        deny all;
     }}
 
     # Directory verification related settings for one-click application for SSL certificate
