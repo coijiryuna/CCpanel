@@ -167,13 +167,20 @@ echo "==> Install OpenLiteSpeed (backend port 8188)"
 # Add OpenLiteSpeed repo (manual — script resmi kadang gagal di Debian baru)
 if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ] || [ "$ID" = "linuxmint" ]; then
   if [ ! -f /etc/apt/sources.list.d/lst_debian_repo.list ]; then
-    wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg https://rpms.litespeedtech.com/debian/lst_debian_repo.gpg 2>/dev/null || true
-    echo "deb https://rpms.litespeedtech.com/debian $VERSION_CODENAME main" > /etc/apt/sources.list.d/lst_debian_repo.list
+    # Use the official LiteSpeed repo script for better compatibility
+    sudo wget -O - https://repo.litespeed.sh | sudo bash
     apt update 2>/dev/null || true
   fi
   # OLS optional — kalau gagal install, panel tetap jalan (backend engine saja)
   if apt-cache show openlitespeed >/dev/null 2>&1; then
-    apt install -y openlitespeed lsphp81 lsphp82 lsphp83 lsphp84 2>/dev/null || apt install -y openlitespeed 2>/dev/null || true
+    # Install lsphp based on detected PHP_PKGS
+    LS_PHP_PKGS=""
+    for pkg in $PHP_PKGS; do
+      if [[ $pkg =~ lsphp([0-9]+\.[0-9]+)-fpm ]]; then
+        LS_PHP_PKGS+="lsphp${BASH_REMATCH[1]} lsphp${BASH_REMATCH[1]}-common lsphp${BASH_REMATCH[1]}-mysql "
+      fi
+    done
+    apt install -y openlitespeed $LS_PHP_PKGS 2>/dev/null || apt install -y openlitespeed 2>/dev/null || true
   else
     echo "==> WARNING: openlitespeed tidak tersedia di repo — lewati (backend OLS nonaktif)"
   fi
