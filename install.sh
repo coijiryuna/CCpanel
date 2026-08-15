@@ -9,8 +9,6 @@
 set -euo pipefail
 
 # --- Parse arguments ---
-APP_DIR="${APP_DIR:-/opt/ccpanel}"
-
 FRESH_INSTALL=false
 for arg in "$@"; do
   case "$arg" in
@@ -58,7 +56,6 @@ if [ "$FRESH_INSTALL" = true ]; then
   rm -rf /etc/nginx/sites-enabled/* /etc/nginx/conf.d/* 2>/dev/null || true
   rm -rf /etc/mysql/mariadb.conf.d/* 2>/dev/null || true  rm -rf /www/wwwroot /www/trash /www/project /www/wwwlogs /www/server 2>/dev/null || true
   rm -f /etc/ccpanel.env 2>/dev/null || true
-  rn -rf "$APP_DIR/data/ccpanel.db" || true
   systemctl daemon-reload
   
   echo "==> Fresh uninstall complete"
@@ -190,6 +187,7 @@ mkdir -p /www/server/panel/vhost/litespeed/extension
 systemctl enable --now apache2 2>/dev/null || true
 systemctl enable --now lsws 2>/dev/null || true
 
+APP_DIR="${APP_DIR:-/opt/ccpanel}"
 echo "==> Salin project ke $APP_DIR"
 mkdir -p "$APP_DIR"
 # static/ prebuilt sudah cukup — dashboard/ (source Vue) tidak diperlukan
@@ -271,9 +269,13 @@ systemctl stop ccpanel || true
 
 # Update admin password in database (in case admin user already exists)
 echo "==> Update admin password in database..."
-CCPANEL_DB_PATH="$APP_DIR/data/ccpanel.db" PANEL_PASSWORD="$PANEL_PASSWORD" $APP_DIR/.venv/bin/python3 -c "
+CCPANEL_DATA_DIR="$APP_DIR/data" PANEL_PASSWORD="$PANEL_PASSWORD" $APP_DIR/.venv/bin/python3 -c "
 import bcrypt, sqlite3, os
-conn = sqlite3.connect(os.environ.get('CCPANEL_DB_PATH'))
+from pathlib import Path
+data_dir = Path(os.environ.get('CCPANEL_DATA_DIR'))
+data_dir.mkdir(parents=True, exist_ok=True)
+db_path = data_dir / 'ccpanel.db'
+conn = sqlite3.connect(db_path)
 pw_hash = bcrypt.hashpw(os.environ.get('PANEL_PASSWORD', '').encode(), bcrypt.gensalt()).decode()
 conn.execute('UPDATE users SET password_hash = ? WHERE username = ?', (pw_hash, 'admin'))
 conn.commit()
