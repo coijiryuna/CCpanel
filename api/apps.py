@@ -4,7 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import apps as apps_ops

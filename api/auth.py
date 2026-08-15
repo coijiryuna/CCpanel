@@ -4,6 +4,7 @@ from __future__ import annotations
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from .deps import _client_ip, _log, app, create_token, get_db, require_auth
