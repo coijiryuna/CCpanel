@@ -57,22 +57,31 @@ init_db()
 if not os.environ.get("CCPANEL_WEBSERVER"):
     with deps.get_db() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key = 'webserver'").fetchone()
-    if row:
-        webserver_ops.set_active(row["value"])
+        if row:
+            webserver_ops.set_active(row["value"])
+        else:
+            # Default to nginx if no setting found
+            webserver_ops.set_active("nginx")
 
 # mode web server (single/multi): env override (testing), kalau tidak dari DB
 if not os.environ.get("CCPANEL_WEBSERVER_MODE"):
     with deps.get_db() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key = 'webserver_mode'").fetchone()
-    if row and row["value"] in webserver_ops.MODES:
-        webserver_ops.set_mode(row["value"])
+        if row and row["value"] in webserver_ops.MODES:
+            webserver_ops.set_mode(row["value"])
+        else:
+            # Default to single if no setting found
+            webserver_ops.set_mode("single")
 
 # engine database aktif: env override (testing), kalau tidak dari DB settings
 if not os.environ.get("CCPANEL_DATABASE"):
     with deps.get_db() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key = 'database'").fetchone()
-    if row:
-        database_ops.set_active(row["value"])
+        if row:
+            database_ops.set_active(row["value"])
+        else:
+            # Default to mysql if no setting found
+            database_ops.set_active("mysql")
 
 # ----------------------------------------------------------------- static
 # Mount TERAKHIR — setelah semua route API. Mount "/" menangkap semua request
