@@ -31,7 +31,7 @@ JWT_EXPIRES_HOURS = 12
 app = FastAPI(title="CCPanel", docs_url=None, redoc_url=None)
 bearer = HTTPBearer(auto_error=False)
 
-from contextlib import closing
+from contextlib import closing, contextmanager
 
 # ------------------------------------------------------------------ database
 def _data_dir() -> Path:
@@ -40,6 +40,7 @@ def _data_dir() -> Path:
 def _db_path() -> Path:
     return _data_dir() / "ccpanel.db"
 
+@contextmanager
 def get_db() -> Generator[sqlite3.Connection, None, None]:
     conn = sqlite3.connect(_db_path(), timeout=30)
     conn.row_factory = sqlite3.Row
@@ -93,8 +94,8 @@ def dt_order(columns: list[str], order_col: str | None = None, order_dir: str = 
 
 def init_db() -> None:
     _data_dir().mkdir(parents=True, exist_ok=True)
-    with closing(get_db()) as conn:
-        next(conn).executescript(
+    with get_db() as conn:
+        conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -204,9 +205,9 @@ def init_db() -> None:
             """
         )
         # migrasi: DB lama belum punya kolom baru
-        ucols = [r[1] for r in next(conn).execute("PRAGMA table_info(users)").fetchall()]
+        ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
         if "role" not in ucols:
-            next(conn).execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'client'")
+            conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'client'")
             conn.execute("UPDATE users SET role = 'admin' WHERE username = 'admin'")
         scols = [r[1] for r in conn.execute("PRAGMA table_info(sites)").fetchall()]
         if "waf_enabled" not in scols:
