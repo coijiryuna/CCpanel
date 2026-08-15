@@ -9,6 +9,8 @@
 set -euo pipefail
 
 # --- Parse arguments ---
+APP_DIR="${APP_DIR:-/opt/ccpanel}"
+
 FRESH_INSTALL=false
 for arg in "$@"; do
   case "$arg" in
@@ -56,6 +58,7 @@ if [ "$FRESH_INSTALL" = true ]; then
   rm -rf /etc/nginx/sites-enabled/* /etc/nginx/conf.d/* 2>/dev/null || true
   rm -rf /etc/mysql/mariadb.conf.d/* 2>/dev/null || true  rm -rf /www/wwwroot /www/trash /www/project /www/wwwlogs /www/server 2>/dev/null || true
   rm -f /etc/ccpanel.env 2>/dev/null || true
+  rn -rf "$APP_DIR/data/ccpanel.db" || true
   systemctl daemon-reload
   
   echo "==> Fresh uninstall complete"
@@ -187,7 +190,6 @@ mkdir -p /www/server/panel/vhost/litespeed/extension
 systemctl enable --now apache2 2>/dev/null || true
 systemctl enable --now lsws 2>/dev/null || true
 
-APP_DIR="${APP_DIR:-/opt/ccpanel}"
 echo "==> Salin project ke $APP_DIR"
 mkdir -p "$APP_DIR"
 # static/ prebuilt sudah cukup — dashboard/ (source Vue) tidak diperlukan
