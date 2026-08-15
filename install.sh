@@ -207,7 +207,17 @@ cp -r server.py api core requirements.txt static scripts "$APP_DIR/"
 
 cd "$APP_DIR"
 echo "==> Backend venv"
-python3 -m venv .venv
+# Try to use python3.12, then python3.11, then python3
+PYTHON_BIN=""
+if command -v python3.12 &> /dev/null; then
+  PYTHON_BIN="python3.12"
+elif command -v python3.11 &> /dev/null; then
+  PYTHON_BIN="python3.11"
+else
+  PYTHON_BIN="python3"
+fi
+echo "Menggunakan $PYTHON_BIN untuk venv"
+"$PYTHON_BIN" -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
 ##echo "==> Build frontend"
