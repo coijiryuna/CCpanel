@@ -288,31 +288,41 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable --now ccpanel
-sleep 2
-systemctl --no-pager --lines=5 status ccpanel
 
-# Stop service before DB operations
-systemctl stop ccpanel || true
-
-# Update admin password in database (in case admin user already exists)
+# Update admin password in database (create admin if not exists)
 echo "==> Update admin password in database..."
 CCPANEL_DATA_DIR="$APP_DIR/data" PANEL_PASSWORD="$PANEL_PASSWORD" $APP_DIR/.venv/bin/python3 -c "
 import bcrypt, sqlite3, os
 from pathlib import Path
+from datetime import datetime, timezone
 data_dir = Path(os.environ.get('CCPANEL_DATA_DIR'))
 data_dir.mkdir(parents=True, exist_ok=True)
 db_path = data_dir / 'ccpanel.db'
 conn = sqlite3.connect(db_path)
+# Ensure users table exists
+conn.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'client',
+        created_at TEXT NOT NULL
+    )
+''')
 pw_hash = bcrypt.hashpw(os.environ.get('PANEL_PASSWORD', '').encode(), bcrypt.gensalt()).decode()
-conn.execute('UPDATE users SET password_hash = ? WHERE username = ?', (pw_hash, 'admin'))
+conn.execute('''
+    INSERT OR REPLACE INTO users (username, password_hash, role, created_at)
+    VALUES (?, ?, 'admin', ?)
+''', ('admin', pw_hash, datetime.now(timezone.utc).isoformat()))
 conn.commit()
 conn.close()
 print('Admin password updated in database')
 "
 
-# Restart service after DB operations
-systemctl restart ccpanel
+# Start service AFTER database is ready
+systemctl enable --now ccpanel
+sleep 2
+systemctl --no-pager --lines=5 status ccpanel
 
 # Sisa rahasia tak boleh di-echo penuh — tampilkan sekali lalu simpan
 echo ""
