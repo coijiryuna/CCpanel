@@ -143,21 +143,23 @@ DEBIAN_FRONTEND=noninteractive apt install -y -o Dpkg::Options::="--force-confmi
 # --- Install Apache (backend port 8288) ---
 echo "==> Install Apache (backend port 8288)"
 apt install -y apache2
-apt install -y libapache2-mod-fcgid || echo "==> WARNING: libapache2-mod-fcgid could not be installed, skipping."
-# Disable default site, enable required modules
-a2dissite 000-default 2>/dev/null || true
-a2enmod proxy proxy_http proxy_fcgi rewrite headers remoteip deflate ssl 2>/dev/null || true
-# Configure Apache to listen ONLY on backend port 8288 (not 80)
-# Remove any existing Listen 80 or Listen 443
+
+# Hentikan Apache dulu dan ubah port ke 8288 SEBELUM install mod-fcgid agar tidak bentrok dengan Nginx di port 80
+systemctl stop apache2 2>/dev/null || true
 sed -i '/^Listen 80$/d' /etc/apache2/ports.conf
 sed -i '/^Listen 443$/d' /etc/apache2/ports.conf
 if ! grep -q "^Listen 8288" /etc/apache2/ports.conf; then
   echo "Listen 8288" >> /etc/apache2/ports.conf
 fi
-# Also check /etc/apache2/ports.conf for any Listen 80 in IncludeOptional
-# Disable default site completely (it listens on 80)
 a2dissite 000-default 2>/dev/null || true
 rm -f /etc/apache2/sites-enabled/000-default.conf 2>/dev/null || true
+
+# Sekarang aman untuk menginstalnya tanpa memicu error port 80
+apt install -y libapache2-mod-fcgid || echo "==> WARNING: libapache2-mod-fcgid could not be installed, skipping."
+
+# Enable modul yang dibutuhkan
+a2enmod proxy proxy_http proxy_fcgi rewrite headers remoteip deflate ssl 2>/dev/null || true
+
 # Create Apache vhost directory for panel
 mkdir -p /etc/apache2/sites-available /etc/apache2/sites-enabled
 mkdir -p /www/server/panel/vhost/apache/extension
@@ -217,15 +219,16 @@ else
   PYTHON_BIN="python3"
 fi
 echo "Menggunakan $PYTHON_BIN untuk venv"
+# MENJADI:
 "$PYTHON_BIN" -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
+.venv/bin/pip install --upgrade pip 2>/dev/null || true
+.venv/bin/pip install -r requirements.txt || .venv/bin/pip install -r requirements.txt
 ##echo "==> Build frontend"
 ##cd dashboard && npm install && npm run build && cd ..
 ## Tidak perlu karena sudah build static
 
-echo "==> Folder website + trash + project + logs"
-mkdir -p /www/wwwroot /www/trash /www/project /www/wwwlogs /etc/nginx/conf.d
+# Tambahkan pembuatan folder data secara eksplisit
+mkdir -p /www/wwwroot /www/trash /www/project /www/wwwlogs /etc/nginx/conf.d "$APP_DIR/data"
 
 # Create www user and group if they don't exist
 if ! getent group www > /dev/null; then
