@@ -142,13 +142,13 @@ def _get_web_user_uid_gid() -> tuple[int, int]:
                          "or create 'www' or 'www-data' with these properties.")
 
 
-def nginx_test() -> None:
+def test() -> None:
     res = _run([LSWS_BIN, "-t"])
     if res.returncode != 0:
         raise WebserverError(res.stderr.strip() or res.stdout.strip() or "lshttpd -t failed")
 
 
-def nginx_reload() -> None:
+def reload() -> None:
     res = _run([LSWS_BIN, "restart"])
     if res.returncode != 0:
         raise WebserverError(res.stderr.strip() or "lshttpd restart failed")

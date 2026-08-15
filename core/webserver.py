@@ -174,8 +174,8 @@ def write_vhost(domain: str, content: str) -> None:
 
 
 def test() -> None:
-    return _engine().nginx_test()
+    return _engine().test()
 
 
 def reload() -> None:
-    return _engine().nginx_reload()
+    return _engine().reload()

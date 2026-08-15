@@ -133,13 +133,13 @@ def _get_web_user_uid_gid() -> tuple[int, int]:
             continue
     raise WebserverError("Cannot find suitable web user for directory ownership (uid >= 11, gid >= 10)")
 
-def nginx_test() -> None:
+def test() -> None:
     res = _run(["apachectl", "-t"])
     if res.returncode != 0:
         raise WebserverError(res.stderr.strip() or res.stdout.strip() or "apachectl -t failed")
 
 
-def nginx_reload() -> None:
+def reload() -> None:
     # skip reload kalau service tak aktif (mis. apache diinstall tapi belum start)
     if _run([SYSTEMCTL, "is-active", "--quiet", "apache2"]).returncode != 0:
         return
