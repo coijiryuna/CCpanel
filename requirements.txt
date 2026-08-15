@@ -1,8 +1,9 @@
-# CCPanel
-fastapi>=0.141.1
-uvicorn>=0.52.3
-pyjwt>=2.8
-bcrypt>=4.1
+# CCPanel - Dependency Valid
+fastapi>=0.110.0
+pydantic>=2.7.0
+uvicorn>=0.30.0
+pyjwt>=2.8.0
+bcrypt>=4.1.0
 python-multipart>=0.0.9
-httpx>=0.27   # dev: TestClient
-redis>=5.0    # opsional: live Redis db0-db15 overview
+httpx>=0.27.0
+redis>=5.0.0

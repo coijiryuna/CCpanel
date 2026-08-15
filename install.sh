@@ -219,10 +219,13 @@ else
   PYTHON_BIN="python3"
 fi
 echo "Menggunakan $PYTHON_BIN untuk venv"
+
 # MENJADI:
 "$PYTHON_BIN" -m venv .venv
-.venv/bin/pip install --upgrade pip 2>/dev/null || true
-.venv/bin/pip install -r requirements.txt || .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install --upgrade pip setuptools wheel
+.venv/bin/pip install --force-reinstall "fastapi>=0.110.0" "pydantic>=2.7.0" uvicorn
+.venv/bin/pip install -r requirements.txt
+
 ##echo "==> Build frontend"
 ##cd dashboard && npm install && npm run build && cd ..
 ## Tidak perlu karena sudah build static
