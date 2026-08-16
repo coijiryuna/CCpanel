@@ -13,7 +13,6 @@ import os
 import traceback
 from datetime import datetime, timezone
 
-# MENJADI (BENAR):
 from fastapi import HTTPException
 from fastapi.requests import Request
 from fastapi.staticfiles import StaticFiles
