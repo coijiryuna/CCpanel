@@ -196,6 +196,13 @@ fi
 mkdir -p /usr/local/lsws/conf/vhosts
 mkdir -p /www/server/panel/vhost/litespeed/extension
 
+# Configure OpenLiteSpeed to listen on port 8188 (not default 8088)
+# This matches the multi-web-server architecture in PLAN.md
+if [ -f /usr/local/lsws/conf/httpd_config.conf ]; then
+  sed -i 's/address\s*8088/address 8188/' /usr/local/lsws/conf/httpd_config.conf
+  sed -i 's/address\s*8088/address 8188/' /usr/local/lsws/conf/httpd_config.conf 2>/dev/null || true
+fi
+
 # Enable and start Apache and OpenLiteSpeed services
 # Apache is configured to listen only on 8288 (not 80), so it won't conflict with nginx
 systemctl enable --now apache2 2>/dev/null || true
