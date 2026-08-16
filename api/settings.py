@@ -46,7 +46,6 @@ def set_webserver_settings(req: WebserverSettings, user: dict = Depends(require_
         )
         _log(conn, user, "settings.webserver", engine)
     webserver_ops.set_active(engine)
-    conn.commit()
     return {"ok": True, "engine": engine}
 
 
@@ -60,7 +59,6 @@ def get_webserver_mode(user: dict = Depends(require_admin)) -> dict:
         row = conn.execute(
             "SELECT value FROM settings WHERE key = 'webserver_mode'").fetchone()
     mode = row["value"] if row else webserver_ops.mode()
-    conn.commit()
     return {"mode": mode if mode in webserver_ops.MODES else "single"}
 
 
@@ -85,7 +83,6 @@ def set_webserver_mode(req: WebserverMode, user: dict = Depends(require_admin)) 
         )
         _log(conn, user, "settings.webserver-mode", mode)
     webserver_ops.set_mode(mode)
-    conn.commit()
     return {"ok": True, "mode": mode}
 
 
@@ -114,5 +111,4 @@ def set_database_settings(req: DatabaseSettings, user: dict = Depends(require_ad
         )
         _log(conn, user, "settings.database", engine)
     database_ops.set_active(engine)
-    conn.commit()
     return {"ok": True, "engine": engine}
