@@ -14,11 +14,13 @@ from core import webserver as webserver_ops
 
 from .deps import _log, app, db_conn, dt_params, dt_response, require_admin
 
+
 class BackupItem(BaseModel):
     name: str
     type: str
     size: int
     mtime: float
+
 
 @app.get("/api/backups", response_model=list[BackupItem] | dict)
 def list_backups(
@@ -44,19 +46,23 @@ def list_backups(
     # sort in-memory: kolom whitelist, arah aman
     col = (order_col or "").strip().lower()
     if col.isdigit():
-        col = ["name", "type", "size", "mtime"][int(col)] if int(col) < 4 else "name"
+        col = ["name", "type", "size", "mtime"][int(
+            col)] if int(col) < 4 else "name"
     if col not in ("name", "type", "size", "mtime"):
         col = "name"
-    items.sort(key=lambda i: getattr(i, col), reverse=(order_dir or "").strip().lower() == "desc")
+    items.sort(key=lambda i: getattr(i, col), reverse=(
+        order_dir or "").strip().lower() == "desc")
     total = len(items)
     page = items[start:start + length] if length else items
     return dt_response(page, start, length, total, total, draw)
+
 
 @app.post("/api/backups/site/{site_id}")
 def backup_site(site_id: int, user: dict = Depends(require_admin)) -> dict:
     """Backup folder root site ke tar.gz."""
     with db_conn() as conn:
-        row = conn.execute("SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
+        row = conn.execute("SELECT * FROM sites WHERE id = ?",
+                           (site_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Site tidak ada")
     try:
@@ -66,11 +72,13 @@ def backup_site(site_id: int, user: dict = Depends(require_admin)) -> dict:
     _log(None, user, "backup.site", row["domain"])
     return {"ok": True, "name": dest.name}
 
+
 @app.post("/api/backups/db/{db_id}")
 def backup_db(db_id: int, user: dict = Depends(require_admin)) -> dict:
     """Backup database ke sql.gz via mysqldump."""
     with db_conn() as conn:
-        row = conn.execute("SELECT * FROM dbs WHERE id = ?", (db_id,)).fetchone()
+        row = conn.execute("SELECT * FROM dbs WHERE id = ?",
+                           (db_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "DB tidak ada")
     try:
@@ -79,6 +87,7 @@ def backup_db(db_id: int, user: dict = Depends(require_admin)) -> dict:
         raise HTTPException(500, str(e)) from e
     _log(None, user, "backup.db", row["db_name"])
     return {"ok": True, "name": dest.name}
+
 
 @app.post("/api/backups/{name}/restore")
 def restore_backup(name: str, user: dict = Depends(require_admin)) -> dict:
@@ -91,7 +100,8 @@ def restore_backup(name: str, user: dict = Depends(require_admin)) -> dict:
             raise HTTPException(500, str(e)) from e
         domain = root.name
         with db_conn() as conn:
-            existing = conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone()
+            existing = conn.execute(
+                "SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone()
             if not existing:
                 try:
                     webserver_ops.activate_site(domain)
@@ -107,6 +117,7 @@ def restore_backup(name: str, user: dict = Depends(require_admin)) -> dict:
                      datetime.now(timezone.utc).isoformat()),
                 )
         _log(None, user, "backup.restore", f"site {domain}")
+        conn.commit()
         return {"ok": True, "domain": domain}
     if name.endswith(".sql.gz"):
         db_name = name.rsplit(".sql.gz", 1)[0]
@@ -115,8 +126,10 @@ def restore_backup(name: str, user: dict = Depends(require_admin)) -> dict:
         except backup_ops.BackupError as e:
             raise HTTPException(500, str(e)) from e
         _log(None, user, "backup.restore", f"db {db_name}")
+        conn.commit()
         return {"ok": True, "db_name": db_name}
     raise HTTPException(400, "Nama backup tidak dikenal")
+
 
 @app.delete("/api/backups/{name}")
 def delete_backup(name: str, user: dict = Depends(require_admin)) -> dict:
@@ -133,4 +146,5 @@ def delete_backup(name: str, user: dict = Depends(require_admin)) -> dict:
     except OSError as e:
         raise HTTPException(500, str(e)) from e
     _log(None, user, "backup.delete", name)
+    conn.commit()
     return {"ok": True}

@@ -230,11 +230,11 @@ def insert_php_block(domain: str, php_version: str, vhost: Path | None = None,
     eng = engine or _detect_engine(vh)
     block = _php_block_for(eng, domain, php_version)
     if eng == "nginx":
-        # sisip sebelum location / { ... } paling akhir
-        if "location / {" in text:
-            text = text.replace("location / {", block + "    location / {", 1)
-        else:
-            text = text.rstrip() + "\n" + block
+        # sisip block PHP di dalam server block, sebelum penutup terakhir
+        idx = text.rstrip().rfind("}")
+        if idx == -1:
+            raise PhpError(f"vhost {vh} tidak valid (tanpa penutup)")
+        text = text[:idx] + block + "\n" + text[idx:]
     else:
         # apache/litespeed: sisip sebelum </VirtualHost>
         if "</VirtualHost>" in text:

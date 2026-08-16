@@ -241,6 +241,7 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
             if req.apply_ssl:
                 cert_ops.install_ssl(domain, [domain] + extra)
             _log(conn, user, "site.create", domain + (f" +{len(extra)} alias" if extra else ""))
+            conn.commit()
             row = conn.execute("SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
         except Exception as e:
             # rollback: urut terbalik dari create
@@ -343,19 +344,17 @@ def disable_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
 
 @app.post("/api/sites/{site_id}/fix-ownership")
 def fix_site_ownership(site_id: int, user: dict = Depends(require_auth)) -> dict:
-    """Fix directory ownership for vhost (uid >= 11, gid >= 10).
-    
+    """Fix directory ownership for vhost.
+
     Use this to fix LiteSpeed/Apache warnings on existing vhosts that were
     created with root ownership. Requires running as root.
-    """
-    with db_conn() as conn:
+    """    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         eng = webserver_ops.for_engine(row["webserver"])
         try:
             eng.fix_vhost_ownership(row["domain"])
         except (AttributeError, webserver_ops.WebserverError) as e:
-            raise HTTPException(500, f"Failed to fix ownership: {str(e)}") from e
-        _log(conn, user, "site.fix_ownership", row["domain"])
+            raise HTTPException(500, f"Failed to fix ownership: {str(e)}") from e _log(conn, user, "site.fix_ownership", row["domain"])
     return {"ok": True, "message": "Vhost ownership fixed"}
 
 def _set_enabled(site_id: int, enabled: bool, user: dict) -> dict:

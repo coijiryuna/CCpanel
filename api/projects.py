@@ -196,6 +196,7 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
         )
         _log(conn, user, "project.create", f"{name}: {req.app_type} port {req.port}"
              + (f" domain {domain}" if domain else " (tanpa domain)"))
+        conn.commit()
         row = conn.execute("SELECT * FROM projects WHERE id = ?", (cur.lastrowid,)).fetchone()
     return _project_row(conn, row)
 
@@ -261,6 +262,7 @@ def update_project(project_id: int, req: ProjectUpdate, user: dict = Depends(req
              remark, str(new_root), project_id),
         )
         _log(conn, user, "project.update", f"{row['name']}: {app_type} port {port}")
+        conn.commit()
         row2 = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     return _project_row(conn, row2)
 
@@ -277,6 +279,7 @@ def delete_project(project_id: int, user: dict = Depends(require_auth)) -> dict:
             raise HTTPException(500, str(e)) from e
         conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         _log(conn, user, "project.delete", row["name"])
+        conn.commit()
     return {"ok": True}
 
 
@@ -333,6 +336,7 @@ def attach_project_domain(project_id: int, req: ProjectDomain, user: dict = Depe
             raise HTTPException(500, str(e)) from e
         conn.execute("UPDATE projects SET domain = ? WHERE id = ?", (domain, project_id))
         _log(conn, user, "project.domain", f"{row['name']}: +{domain} -> :{row['port']}")
+        conn.commit()
         row2 = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     return _project_row(conn, row2)
 
@@ -349,6 +353,7 @@ def detach_project_domain(project_id: int, user: dict = Depends(require_auth)) -
             raise HTTPException(500, str(e)) from e
         conn.execute("UPDATE projects SET domain = '' WHERE id = ?", (project_id,))
         _log(conn, user, "project.domain-remove", f"{row['name']}: -{row['domain']}")
+        conn.commit()
         row2 = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     return _project_row(conn, row2)
 

@@ -16,6 +16,7 @@ from core import database, validate
 
 from .deps import _log, app, check_site_access, db_conn, require_auth
 
+
 class CmsInstall(BaseModel):
     cms: str
     domain: str
@@ -26,9 +27,11 @@ class CmsInstall(BaseModel):
     lang: str = ""
     wp_version: str = "latest"
 
+
 @app.get("/api/cms")
 def cms_catalog(user: dict = Depends(require_auth)) -> dict:
     return {"ok": True, "items": cms_ops.catalog()}
+
 
 @app.get("/api/sites/{site_id}/cms")
 def cms_detect(site_id: int, user: dict = Depends(require_auth)) -> dict:
@@ -45,10 +48,12 @@ def cms_detect(site_id: int, user: dict = Depends(require_auth)) -> dict:
             # baca WPLANG dari wp-config
             wc = root / "wp-config.php"
             if wc.exists():
-                m = _re.search(r"define\s*\(\s*'WPLANG'\s*,\s*'([^']+)'\s*\)", wc.read_text())
+                m = _re.search(
+                    r"define\s*\(\s*'WPLANG'\s*,\s*'([^']+)'\s*\)", wc.read_text())
                 if m:
                     lang = m.group(1)
     return {"domain": site["domain"], "cms": cms, "version": version, "lang": lang}
+
 
 @app.post("/api/cms/install")
 def cms_install(req: CmsInstall, user: dict = Depends(require_auth)) -> dict:
@@ -56,7 +61,8 @@ def cms_install(req: CmsInstall, user: dict = Depends(require_auth)) -> dict:
     cms = req.cms.strip().lower()
     domain = req.domain.strip().lower()
     if cms not in cms_ops.CMS_CATALOG:
-        raise HTTPException(400, f"CMS tidak dikenal. Pilihan: {', '.join(cms_ops.CMS_CATALOG)}")
+        raise HTTPException(
+            400, f"CMS tidak dikenal. Pilihan: {', '.join(cms_ops.CMS_CATALOG)}")
     if not validate.valid_domain(domain):
         raise HTTPException(400, "Domain tidak valid")
 
@@ -65,7 +71,8 @@ def cms_install(req: CmsInstall, user: dict = Depends(require_auth)) -> dict:
     from core import php as php_ops
     if cms == "wordpress":
         if php_version != "static" and php_version not in php_ops.PHP_VERSIONS:
-            raise HTTPException(400, f"PHP version tidak valid. Pilihan: {', '.join(php_ops.PHP_VERSIONS)}")
+            raise HTTPException(
+                400, f"PHP version tidak valid. Pilihan: {', '.join(php_ops.PHP_VERSIONS)}")
     else:
         php_version = "static"
 
@@ -78,23 +85,28 @@ def cms_install(req: CmsInstall, user: dict = Depends(require_auth)) -> dict:
     # versi WordPress
     wp_version = (req.wp_version or "latest").strip()
     if cms == "wordpress" and wp_version not in cms_ops.WP_VERSIONS:
-        raise HTTPException(400, f"Versi WordPress tidak valid. Pilihan: {', '.join(cms_ops.WP_VERSIONS)}")
+        raise HTTPException(
+            400, f"Versi WordPress tidak valid. Pilihan: {', '.join(cms_ops.WP_VERSIONS)}")
 
     # DB auto-generate kalau kosong (hanya a-z0-9_ valid utk nama DB)
-    db_name = (req.db_name or "").strip().lower() or re.sub(r"[^a-z0-9_]", "_", domain)
+    db_name = (req.db_name or "").strip().lower(
+    ) or re.sub(r"[^a-z0-9_]", "_", domain)
     db_user = (req.db_user or "").strip().lower() or db_name[:16]
     db_pass = (req.db_pass or "").strip() or secrets.token_urlsafe(12)
     for label, val in (("Nama DB", db_name), ("Username DB", db_user)):
         if not validate.valid_db_name(val):
-            raise HTTPException(400, f"{label} tidak valid (a-z, 0-9, _, max 64)")
+            raise HTTPException(
+                400, f"{label} tidak valid (a-z, 0-9, _, max 64)")
     if not db_pass or len(db_pass) > 128:
         raise HTTPException(400, "Password DB tidak valid (1-128 char)")
 
     # site harus ada + akses
     with db_conn() as conn:
-        site = check_site_access(conn, int(_site_id_by_domain(conn, domain)), user)
+        site = check_site_access(
+            conn, int(_site_id_by_domain(conn, domain)), user)
     if not Path(site["root_path"]).is_dir():
-        raise HTTPException(400, f"Folder root site tidak ada: {site['root_path']}")
+        raise HTTPException(
+            400, f"Folder root site tidak ada: {site['root_path']}")
 
     # DB name harus unik
     with db_conn() as conn:
@@ -113,7 +125,8 @@ def cms_install(req: CmsInstall, user: dict = Depends(require_auth)) -> dict:
         conn.execute(
             "INSERT INTO dbs (site_id, db_name, db_user, db_pass, db_host, db_type, owner_id, created_at) "
             "VALUES (?, ?, ?, ?, 'localhost', 'mysql', NULL, ?)",
-            (site["id"], db_name, db_user, db_pass, datetime.now(timezone.utc).isoformat()),
+            (site["id"], db_name, db_user, db_pass,
+             datetime.now(timezone.utc).isoformat()),
         )
         # simpan PHP version + project_type php utk site (pool sudah dibuat)
         if cms == "wordpress" and php_version != "static":
@@ -121,12 +134,15 @@ def cms_install(req: CmsInstall, user: dict = Depends(require_auth)) -> dict:
                 "UPDATE sites SET php_version = ?, project_type = 'php' WHERE id = ?",
                 (php_version, site["id"]),
             )
-
-    _log(None, user, "cms.install", f"{cms} → {domain} (db {db_name}, php {php_version}, lang {lang or 'en_US'}, v{res.get('version') or wp_version})")
+    conn.commit()
+    _log(None, user, "cms.install",
+         f"{cms} → {domain} (db {db_name}, php {php_version}, lang {lang or 'en_US'}, v{res.get('version') or wp_version})")
     return {"ok": True, **res}
 
+
 def _site_id_by_domain(conn, domain: str) -> int:
-    row = conn.execute("SELECT id FROM sites WHERE domain = ?", (domain,)).fetchone()
+    row = conn.execute(
+        "SELECT id FROM sites WHERE domain = ?", (domain,)).fetchone()
     if row is None:
         raise HTTPException(404, f"Site tidak ada: {domain}")
     return row["id"]

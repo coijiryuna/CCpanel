@@ -119,6 +119,7 @@ def create_cron_job(req: CronJobCreate, user: dict = Depends(require_auth)) -> d
         except cron_ops.CronError as e:
             raise HTTPException(500, str(e)) from e
         _log(conn, user, "cron.add", f"{name}: {kind} {schedule} {command}")
+        conn.commit()
         row = conn.execute("SELECT * FROM cron_jobs WHERE id = ?", (cur.lastrowid,)).fetchone()
     return _job_row(row)
 
@@ -137,4 +138,5 @@ def delete_cron_job(job_id: int, user: dict = Depends(require_auth)) -> dict:
         except cron_ops.CronError as e:
             raise HTTPException(500, str(e)) from e
         _log(conn, user, "cron.remove", row["name"])
+        conn.commit()
     return {"ok": True}

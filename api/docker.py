@@ -41,6 +41,7 @@ class CreateContainerReq(BaseModel):
     cmd: str = ""
     domain: str = ""
 
+
 class ContainerDomainReq(BaseModel):
     domain: str
     port: int
@@ -118,8 +119,10 @@ def docker_create_container(req: CreateContainerReq, user: dict = Depends(requir
     if req.domain:
         host_port = req.port.split(",")[0].split(":")[0].strip()
         if not host_port.isdigit():
-            raise HTTPException(400, "Domain butuh mapping port host:container (mis. 8080:80)")
+            raise HTTPException(
+                400, "Domain butuh mapping port host:container (mis. 8080:80)")
         _attach_domain(cid or req.name, req.domain, int(host_port), user)
+        conn.commit()
     return {"ok": True, "id": cid}
 
 
@@ -149,12 +152,14 @@ def _attach_domain(container: str, domain: str, port: int, user: dict) -> None:
              datetime.now(timezone.utc).isoformat()),
         )
         _log(conn, user, "docker.domain-add", f"{domain} → {container}:{port}")
+        conn.commit()
 
 
 @app.post("/api/docker/containers/{container_id}/domain")
 def docker_container_domain_add(container_id: str, req: ContainerDomainReq, user: dict = Depends(require_auth)) -> dict:
     """Pasang domain ke container yang sudah ada. Proxy ke host port."""
     _attach_domain(container_id, req.domain, req.port, user)
+    conn.commit()
     return {"ok": True}
 
 
@@ -162,7 +167,8 @@ def docker_container_domain_add(container_id: str, req: ContainerDomainReq, user
 def docker_container_domain_remove(container_id: str, user: dict = Depends(require_auth)) -> dict:
     """Lepas domain container. Hapus vhost proxy."""
     with db_conn() as conn:
-        row = conn.execute("SELECT domain FROM docker_domains WHERE container = ?", (container_id,)).fetchone()
+        row = conn.execute(
+            "SELECT domain FROM docker_domains WHERE container = ?", (container_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Container tidak punya domain")
         domain = row["domain"]
@@ -171,12 +177,15 @@ def docker_container_domain_remove(container_id: str, user: dict = Depends(requi
     except nginx_ops.NginxError as e:
         raise HTTPException(400, str(e)) from e
     with db_conn() as conn:
-        conn.execute("DELETE FROM docker_domains WHERE container = ?", (container_id,))
+        conn.execute(
+            "DELETE FROM docker_domains WHERE container = ?", (container_id,))
+        conn.commit()
         _log(conn, user, "docker.domain-remove", f"{container_id}: -{domain}")
     return {"ok": True}
 
 
 MAX_IMPORT_SIZE = 512 * 1024 * 1024  # 512 MB — batas file tar image
+
 
 @app.post("/api/docker/images/import")
 async def docker_import_image(file: UploadFile = File(...), user: dict = Depends(require_auth)) -> dict:
@@ -184,7 +193,8 @@ async def docker_import_image(file: UploadFile = File(...), user: dict = Depends
     `docker load -i`, hapus temp. Size dicek saat stream (tak percaya header)."""
     name = (file.filename or "image.tar").replace("\\", "/").split("/")[-1]
     if not (name.endswith(".tar") or name.endswith(".tar.gz") or name.endswith(".tgz")):
-        raise HTTPException(400, "File harus .tar / .tar.gz / .tgz (hasil docker save)")
+        raise HTTPException(
+            400, "File harus .tar / .tar.gz / .tgz (hasil docker save)")
     try:
         with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as tmp:
             tmp_path = Path(tmp.name)
@@ -192,7 +202,8 @@ async def docker_import_image(file: UploadFile = File(...), user: dict = Depends
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_IMPORT_SIZE:
-                    raise HTTPException(400, f"File > {MAX_IMPORT_SIZE // 1024 // 1024} MB — terlalu besar")
+                    raise HTTPException(
+                        400, f"File > {MAX_IMPORT_SIZE // 1024 // 1024} MB — terlalu besar")
                 tmp.write(chunk)
         try:
             out = docker_ops.load_image(str(tmp_path))

@@ -84,8 +84,8 @@ extprocessor {domain} {{
     respBuffer              0
     autoStart               1
     path                    /usr/local/lsws/lsphp00/bin/lsphp
-    extUser                 www
-    extGroup                www
+    extUser                 nobody
+    extGroup                nogroup
     memSoftLimit            2047M
     memHardLimit            2047M
     procSoftLimit           1000
@@ -117,29 +117,23 @@ def root_path(domain: str) -> Path:
 
 
 def _get_web_user_uid_gid() -> tuple[int, int]:
-    """Get uid/gid for web user (www atau www-data). LiteSpeed requires UID >= 11, GID >= 10."""
-    # First, check common web server users
-    for user_name in ("www-data", "www"):
+    """Get uid/gid for web user. LiteSpeed wants non-root uid/gid."""
+    for user_name in ("www-data", "www", "nobody"):
         try:
             pw = pwd.getpwnam(user_name)
             gr = grp.getgrgid(pw.pw_gid)
-            if pw.pw_uid >= 11 and gr.gr_gid >= 10:
+            if pw.pw_uid > 0 and gr.gr_gid > 0:
                 return pw.pw_uid, gr.gr_gid
         except KeyError:
-            pass # User not found, try next
-
-    # If common users don't fit, search for any user with appropriate UID/GID
+            continue
     for pw in pwd.getpwall():
         try:
             gr = grp.getgrgid(pw.pw_gid)
-            if pw.pw_uid >= 11 and gr.gr_gid >= 10:
+            if pw.pw_uid > 0 and gr.gr_gid > 0:
                 return pw.pw_uid, gr.gr_gid
         except KeyError:
-            pass # Group not found, skip
-
-    raise WebserverError("Cannot find suitable web user for directory ownership (uid >= 11, gid >= 10). "
-                         "Please ensure a user with UID >= 11 and GID >= 10 exists, "
-                         "or create 'www' or 'www-data' with these properties.")
+            continue
+    raise WebserverError("Cannot find suitable web user for directory ownership (non-root uid/gid required)")
 
 
 def test() -> None:
@@ -239,8 +233,8 @@ extprocessor {domain} {{
     respBuffer              0
     autoStart               1
     path                    /usr/local/lsws/lsphp00/bin/lsphp
-    extUser                 www
-    extGroup                www
+    extUser                 nobody
+    extGroup                nogroup
     memSoftLimit            2047M
     memHardLimit            2047M
     procSoftLimit           1000

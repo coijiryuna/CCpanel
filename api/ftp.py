@@ -104,6 +104,7 @@ def create_ftp(req: FtpCreate, user: dict = Depends(require_auth)) -> FtpRespons
             (req.site_id, req.username.strip(), password, datetime.now(timezone.utc).isoformat()),
         )
         _log(conn, user, "ftp.create", f"{req.username.strip()} → {site['domain']}")
+        conn.commit()
         row = conn.execute("SELECT * FROM ftp_accounts WHERE id = ?", (cur.lastrowid,)).fetchone()
     return _ftp_row(row, site["domain"])
 
@@ -117,6 +118,7 @@ def reset_ftp_password(ftp_id: int, user: dict = Depends(require_auth)) -> FtpRe
             raise HTTPException(400, str(e)) from e
         conn.execute("UPDATE ftp_accounts SET password = ? WHERE id = ?", (password, ftp_id))
         _log(conn, user, "ftp.reset-password", row["username"])
+        conn.commit()
         row = conn.execute("SELECT * FROM ftp_accounts WHERE id = ?", (ftp_id,)).fetchone()
     return _ftp_row(row)
 
@@ -130,4 +132,5 @@ def delete_ftp(ftp_id: int, user: dict = Depends(require_auth)) -> dict:
             raise HTTPException(400, str(e)) from e
         conn.execute("DELETE FROM ftp_accounts WHERE id = ?", (ftp_id,))
         _log(conn, user, "ftp.delete", row["username"])
+        conn.commit()
     return {"ok": True}

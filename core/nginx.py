@@ -241,7 +241,7 @@ def _proxy_block(subpath: str, port: int) -> str:
         "        proxy_set_header X-Real-IP $remote_addr;\n"
         "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
         "        proxy_set_header X-Forwarded-Proto $scheme;\n"
-        "    }"
+        "    }\n"
     )
 
 
@@ -326,7 +326,7 @@ def _proxy_root_block(port: int) -> str:
         "        proxy_set_header X-Real-IP $remote_addr;\n"
         "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
         "        proxy_set_header X-Forwarded-Proto $scheme;\n"
-        "    }"
+        "    }\n"
     )
 
 def _static_root_block() -> str:
@@ -477,7 +477,6 @@ def _front_proxy_conf(domain: str, port: int, ssl: str = "") -> str:
         "\n"
         f"    access_log /www/wwwlogs/{domain}.log;\n"
         f"    error_log  /www/wwwlogs/{domain}.error.log;\n"
-        "\n"
         "}\n"
     )
 

@@ -109,6 +109,7 @@ def create_db(req: DbCreate, user: dict = Depends(require_auth)) -> DbResponse:
              datetime.now(timezone.utc).isoformat()),
         )
         _log(conn, user, "db.create", f"{db_name} ({db_user}@{host})")
+        conn.commit()
         row = conn.execute("SELECT * FROM dbs WHERE id = ?", (cur.lastrowid,)).fetchone()
     return _db_row(row)
 
@@ -432,6 +433,7 @@ def reset_db_password(db_id: int, user: dict = Depends(require_auth)) -> DbRespo
             raise HTTPException(500, str(e)) from e
         conn.execute("UPDATE dbs SET db_pass = ? WHERE id = ?", (password, db_id))
         _log(conn, user, "db.reset-password", row["db_name"])
+        conn.commit()
         row = conn.execute("SELECT * FROM dbs WHERE id = ?", (db_id,)).fetchone()
     return _db_row(row)
 
@@ -446,4 +448,5 @@ def delete_db(db_id: int, user: dict = Depends(require_auth)) -> dict:
             raise HTTPException(500, str(e)) from e
         conn.execute("DELETE FROM dbs WHERE id = ?", (db_id,))
         _log(conn, user, "db.delete", row["db_name"])
+        conn.commit()
     return {"ok": True}

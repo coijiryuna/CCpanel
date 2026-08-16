@@ -263,7 +263,7 @@ def put_file_content(site_id: int, req: TextReq, user: dict = Depends(require_au
     target = _resolve_within(root, req.path)
     data = req.content.encode("utf-8")
     if len(data) > MAX_TEXT_SIZE:
-        raise HTTPException(400, f"File > {MAX_TEXT_SIZE // 1024 // 1024} MB — terlalu besar")
+        raise HTTPException(400, f"File > {MAX_TEXT_SIZE // 10240 // 10240} MB — terlalu besar")
     if target.exists():
         if not target.is_file():
             raise HTTPException(400, "Bukan file")

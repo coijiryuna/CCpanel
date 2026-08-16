@@ -145,6 +145,7 @@ def create_app(site_id: int, req: AppCreate, user: dict = Depends(require_auth))
              datetime.now(timezone.utc).isoformat()),
         )
         _log(conn, user, "app.create", f"{site['domain']}: {app_type} port {port}")
+        conn.commit()
         row = conn.execute("SELECT * FROM site_apps WHERE id = ?", (cur.lastrowid,)).fetchone()
     return _app_row(conn, row, site)
 
@@ -229,6 +230,7 @@ def update_app(site_id: int, req: AppCreate, user: dict = Depends(require_auth))
              1 if pm2 else 0, remark, row["id"]),
         )
         _log(conn, user, "app.update", f"{site['domain']}: {app_type} port {port}")
+        conn.commit()
         row2 = conn.execute("SELECT * FROM site_apps WHERE id = ?", (row["id"],)).fetchone()
     return _app_row(conn, row2, site)
 
@@ -247,4 +249,5 @@ def delete_app(site_id: int, user: dict = Depends(require_auth)) -> dict:
             raise HTTPException(500, str(e)) from e
         conn.execute("DELETE FROM site_apps WHERE id = ?", (row["id"],))
         _log(conn, user, "app.delete", site["domain"])
+        conn.commit()
     return {"ok": True}
