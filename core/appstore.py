@@ -38,6 +38,14 @@ APPSTORE_CACHE = Path(os.environ.get("CCPANEL_APPSTORE_CACHE", "/var/cache/ccpan
 APPSTORE_TTL = int(os.environ.get("CCPANEL_APPSTORE_TTL", "3600"))
 SYSTEMCTL = os.environ.get("CCPANEL_SYSTEMCTL", "systemctl")
 SERVICE_ACTIONS = {"start", "stop", "restart", "reload"}
+PHP_REPO_SETUP = os.environ.get("CCPANEL_PHP_REPO_SETUP", "auto")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CATALOG_FILE = Path(os.environ.get("CCPANEL_APPSTORE_CATALOG", REPO_ROOT / "catalog.json"))
+GO_VERSION_MAP = {
+    "go1.22": "1.22.12",
+    "go1.23": "1.23.6",
+    "go1.24": "1.24.5",
+}
 
 # Direktori binary non-PATH umum (nginx, apache2, php-fpm sering di sini).
 # Bisa di-override env utk testing.
@@ -85,51 +93,51 @@ def task_list() -> list[dict]:
 # bisa diserialisasi ke JSON remote.
 CATALOG: list[dict] = [
     # ---- PHP ----
-    {"id": "php7.4", "name": "PHP 7.4", "category": "php", "desc": "PHP-FPM 7.4 (legacy)",
+    {"id": "php7.4", "name": "PHP 7.4", "category": "php", "kind": "php", "desc": "PHP-FPM 7.4 (legacy)",
      "install": [APT, "install", "-y", "php7.4-fpm"], "uninstall": [APT, "remove", "-y", "php7.4-fpm"],
      "detect": {"type": "which", "bin": ["php7.4", "php-fpm7.4"]}, "service": "php7.4-fpm"},
-    {"id": "php8.0", "name": "PHP 8.0", "category": "php", "desc": "PHP-FPM 8.0",
+    {"id": "php8.0", "name": "PHP 8.0", "category": "php", "kind": "php", "desc": "PHP-FPM 8.0",
      "install": [APT, "install", "-y", "php8.0-fpm"], "uninstall": [APT, "remove", "-y", "php8.0-fpm"],
      "detect": {"type": "which", "bin": ["php8.0", "php-fpm8.0"]}, "service": "php8.0-fpm"},
-    {"id": "php8.1", "name": "PHP 8.1", "category": "php", "desc": "PHP-FPM 8.1",
+    {"id": "php8.1", "name": "PHP 8.1", "category": "php", "kind": "php", "desc": "PHP-FPM 8.1",
      "install": [APT, "install", "-y", "php8.1-fpm"], "uninstall": [APT, "remove", "-y", "php8.1-fpm"],
      "detect": {"type": "which", "bin": ["php8.1", "php-fpm8.1"]}, "service": "php8.1-fpm"},
-    {"id": "php8.2", "name": "PHP 8.2", "category": "php", "desc": "PHP-FPM 8.2",
+    {"id": "php8.2", "name": "PHP 8.2", "category": "php", "kind": "php", "desc": "PHP-FPM 8.2",
      "install": [APT, "install", "-y", "php8.2-fpm"], "uninstall": [APT, "remove", "-y", "php8.2-fpm"],
      "detect": {"type": "which", "bin": ["php8.2", "php-fpm8.2"]}, "service": "php8.2-fpm"},
-    {"id": "php8.3", "name": "PHP 8.3", "category": "php", "desc": "PHP-FPM 8.3",
+    {"id": "php8.3", "name": "PHP 8.3", "category": "php", "kind": "php", "desc": "PHP-FPM 8.3",
      "install": [APT, "install", "-y", "php8.3-fpm"], "uninstall": [APT, "remove", "-y", "php8.3-fpm"],
      "detect": {"type": "which", "bin": ["php8.3", "php-fpm8.3"]}, "service": "php8.3-fpm"},
-    {"id": "php8.4", "name": "PHP 8.4", "category": "php", "desc": "PHP-FPM 8.4 (Debian 13/trixie)",
+    {"id": "php8.4", "name": "PHP 8.4", "category": "php", "kind": "php", "desc": "PHP-FPM 8.4 (Debian 13/trixie)",
      "install": [APT, "install", "-y", "php8.4-fpm"], "uninstall": [APT, "remove", "-y", "php8.4-fpm"],
      "detect": {"type": "which", "bin": ["php8.4", "php-fpm8.4"]}, "service": "php8.4-fpm"},
     # ---- Node (nvm) ----
-    {"id": "node18", "name": "Node.js 18", "category": "node", "desc": "Node.js v18 LTS via nvm",
+    {"id": "node18", "name": "Node.js 18", "category": "node", "kind": "node", "desc": "Node.js v18 LTS via nvm",
      "install": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm install 18"],
      "uninstall": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm uninstall 18"],
      "detect": {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v18")}},
-    {"id": "node20", "name": "Node.js 20", "category": "node", "desc": "Node.js v20 LTS via nvm",
+    {"id": "node20", "name": "Node.js 20", "category": "node", "kind": "node", "desc": "Node.js v20 LTS via nvm",
      "install": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm install 20"],
      "uninstall": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm uninstall 20"],
      "detect": {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v20")}},
-    {"id": "node22", "name": "Node.js 22", "category": "node", "desc": "Node.js v22 LTS via nvm",
+    {"id": "node22", "name": "Node.js 22", "category": "node", "kind": "node", "desc": "Node.js v22 LTS via nvm",
      "install": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm install 22"],
      "uninstall": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm uninstall 22"],
      "detect": {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v22")}},
-    {"id": "node24", "name": "Node.js 24", "category": "node", "desc": "Node.js v24 via nvm",
+    {"id": "node24", "name": "Node.js 24", "category": "node", "kind": "node", "desc": "Node.js v24 via nvm",
      "install": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm install 24"],
      "uninstall": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm uninstall 24"],
      "detect": {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v24")}},
     # ---- Go SDK ----
-    {"id": "go1.22", "name": "Go 1.22", "category": "go", "desc": "Go SDK 1.22",
+    {"id": "go1.22", "name": "Go 1.22", "category": "go", "kind": "go", "desc": "Go SDK 1.22",
      "install": ["bash", "-lc", f"mkdir -p {GO_ROOT} && curl -sSL https://go.dev/dl/go1.22.linux-amd64.tar.gz | tar -C {GO_ROOT} -xzf - && mv {GO_ROOT}/go {GO_ROOT}/go1.22"],
      "uninstall": ["rm", "-rf", str(GO_ROOT / "go1.22")],
      "detect": {"type": "dir", "path": str(GO_ROOT / "go1.22")}},
-    {"id": "go1.23", "name": "Go 1.23", "category": "go", "desc": "Go SDK 1.23",
+    {"id": "go1.23", "name": "Go 1.23", "category": "go", "kind": "go", "desc": "Go SDK 1.23",
      "install": ["bash", "-lc", f"mkdir -p {GO_ROOT} && wget -qO- https://go.dev/dl/go1.23.linux-amd64.tar.gz | tar -C {GO_ROOT} -xzf && mv {GO_ROOT}/go {GO_ROOT}/go1.23"],
      "uninstall": ["rm", "-rf", str(GO_ROOT / "go1.23")],
      "detect": {"type": "dir", "path": str(GO_ROOT / "go1.23")}},
-    {"id": "go1.24", "name": "Go 1.24", "category": "go", "desc": "Go SDK 1.24",
+    {"id": "go1.24", "name": "Go 1.24", "category": "go", "kind": "go", "desc": "Go SDK 1.24",
      "install": ["bash", "-lc", f"mkdir -p {GO_ROOT} && wget -qO- https://go.dev/dl/go1.24.linux-amd64.tar.gz | tar -C {GO_ROOT} -xz && mv {GO_ROOT}/go {GO_ROOT}/go1.24"],
      "uninstall": ["rm", "-rf", str(GO_ROOT / "go1.24")],
      "detect": {"type": "dir", "path": str(GO_ROOT / "go1.24")}},
@@ -184,6 +192,57 @@ def _run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
         raise AppStoreError(f"Timeout: {' '.join(cmd)}") from e
 
 
+def _php_install_cmd(version: str) -> list[str]:
+    return ["bash", "-lc", (
+        "set -e; "
+        "export DEBIAN_FRONTEND=noninteractive; "
+        "if ! command -v php{v}-fpm >/dev/null 2>&1; then "
+        "  if [ \"$CCPANEL_PHP_REPO_SETUP\" = auto ] || [ \"$CCPANEL_PHP_REPO_SETUP\" = yes ]; then "
+        "    if ! apt-cache show php{v}-fpm >/dev/null 2>&1; then "
+        "      if [ ! -f /etc/apt/sources.list.d/ondrej-php.list ] && [ ! -f /etc/apt/sources.list.d/php.list ]; then "
+        "        apt-get update; "
+        "        apt-get install -y software-properties-common ca-certificates curl gnupg; "
+        "        if command -v add-apt-repository >/dev/null 2>&1; then "
+        "          add-apt-repository -y ppa:ondrej/php; "
+        "        fi; "
+        "        if [ -n \"$(command -v wget 2>/dev/null)\" ] || command -v curl >/dev/null 2>&1; then true; fi; "
+        "        apt-get update; "
+        "      fi; "
+        "    fi; "
+        "  fi; "
+        "  apt-get update; apt-get install -y php{v}-fpm php{v}-cli php{v}-common; "
+        "fi"
+    ).format(v=version)]
+
+
+def _node_install_cmd(version: str) -> list[str]:
+    return ["bash", "-lc", (
+        "set -e; "
+        "export NVM_DIR=\"${NVM_DIR:-$HOME/.nvm}\"; "
+        "mkdir -p \"$NVM_DIR\"; "
+        "if [ ! -s \"$NVM_DIR/nvm.sh\" ]; then "
+        "  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash; "
+        "fi; "
+        ". \"$NVM_DIR/nvm.sh\"; "
+        "nvm install {v}; nvm alias default {v}"
+    ).format(v=version)]
+
+
+def _go_install_cmd(version: str) -> list[str]:
+    gover = GO_VERSION_MAP[version]
+    return ["bash", "-lc", (
+        "set -e; "
+        "tmp=$(mktemp -d); "
+        "arch=$(dpkg --print-architecture); "
+        "case \"$arch\" in amd64) goarch=amd64 ;; arm64) goarch=arm64 ;; *) echo 'unsupported arch'; exit 1 ;; esac; "
+        "curl -fsSL -o \"$tmp/go.tgz\" https://go.dev/dl/go{ver}.linux-${{goarch}}.tar.gz; "
+        "rm -rf {root}/{name}; mkdir -p {root}; "
+        "tar -C {root} -xzf \"$tmp/go.tgz\"; "
+        "mv {root}/go {root}/{name}; "
+        "rm -rf \"$tmp\""
+    ).format(ver=gover, root=str(GO_ROOT), name=version)]
+
+
 def _which(bin_name: str) -> bool:
     """Cek binary ada: PATH + direktori sbin umum.
 
@@ -229,38 +288,74 @@ def _validate_item(item: dict) -> bool:
     return True
 
 
+def _materialize_item(item: dict) -> dict:
+    out = dict(item)
+    if out.get("kind") == "php":
+        v = out["id"].replace("php", "")
+        out["install"] = _php_install_cmd(v)
+        out["uninstall"] = [APT, "remove", "-y", f"php{v}-fpm", f"php{v}-cli", f"php{v}-common"]
+    elif out.get("kind") == "node":
+        out["install"] = _node_install_cmd(out["id"].replace("node", ""))
+        out["uninstall"] = ["bash", "-lc", f"source ${{NVM_DIR:-$HOME/.nvm}}/nvm.sh && nvm uninstall {out['id'].replace('node', '')}"]
+    elif out.get("kind") == "go":
+        out["install"] = _go_install_cmd(out["id"])
+        out["uninstall"] = ["rm", "-rf", str(GO_ROOT / out["id"])]
+    return out
+
+
 def _load_catalog() -> list[dict]:
-    """Katalog efektif: remote (cache) kalau ada, else statis."""
-    if not APPSTORE_URL:
-        return CATALOG
-    cached = _read_cache()
+    """Katalog efektif: local catalog.json + remote/cache versioned."""
+    local_version, local = _read_catalog_source(CATALOG_FILE)
+    cached_version, cached = _read_catalog_source(APPSTORE_CACHE, cached=True)
     if cached is not None:
-        return cached
-    fetched = _fetch_remote()
-    if fetched is not None:
-        _write_cache(fetched)
-        return fetched
-    # remote gagal & tak ada cache → fallback statis
-    return CATALOG
+        if local is not None and cached_version >= local_version:
+            return cached
+        if local is None:
+            return cached
+    remote = _fetch_remote()
+    if remote is not None:
+        remote_version = _fetch_remote_version()
+        if local is not None and remote_version < local_version:
+            _write_cache(local_version, local)
+            return local
+        _write_cache(remote_version, remote)
+        return remote
+    if local is not None:
+        _write_cache(local_version, local)
+        return local
+    return [_materialize_item(item) for item in CATALOG]
 
 
-def _read_cache():
+def _read_catalog_source(path: Path, cached: bool = False) -> tuple[int, list[dict] | None]:
     try:
-        if not APPSTORE_CACHE.exists():
-            return None
-        age = time.time() - APPSTORE_CACHE.stat().st_mtime
-        if age > APPSTORE_TTL:
-            return None
-        data = json.loads(APPSTORE_CACHE.read_text())
-        return _parse_items(data)
+        if not path.exists():
+            return 0, None
+        if cached:
+            age = time.time() - path.stat().st_mtime
+            if age > APPSTORE_TTL:
+                return 0, None
+        raw = json.loads(path.read_text())
+        version = int(raw.get("version", 0)) if isinstance(raw, dict) else 0
+        return version, _parse_items(raw)
     except Exception:
-        return None
+        return 0, None
 
 
-def _write_cache(items: list[dict]) -> None:
+def _fetch_remote_version() -> int:
+    try:
+        with urllib.request.urlopen(APPSTORE_URL, timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        if isinstance(data, dict):
+            return int(data.get("version", 0))
+    except Exception:
+        pass
+    return 0
+
+
+def _write_cache(version: int, items: list[dict]) -> None:
     try:
         APPSTORE_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        APPSTORE_CACHE.write_text(json.dumps({"version": 1, "items": items}))
+        APPSTORE_CACHE.write_text(json.dumps({"version": version, "items": items}))
     except Exception:
         pass
 
@@ -287,6 +382,17 @@ def _parse_items(data) -> list[dict] | None:
         seen.add(it["id"])
         items.append(it)
     return items or None
+
+
+def refresh_catalog(force: bool = False) -> list[dict]:
+    """Manual refresh cache. force=True abaikan TTL."""
+    if force and APPSTORE_CACHE.exists():
+        try:
+            APPSTORE_CACHE.unlink()
+        except Exception:
+            pass
+    items = _load_catalog()
+    return items
 
 
 def list_catalog() -> list[dict]:

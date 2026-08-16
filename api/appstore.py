@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException
-from fastapi.requests import Request
 
 from core import appstore as store
 
@@ -12,6 +11,12 @@ from .deps import _log, app, db_conn, get_db, require_auth
 @app.get("/api/appstore")
 def appstore_list(_=Depends(require_auth), db=Depends(get_db)):
     return {"ok": True, "items": store.list_catalog(), "tasks": store.task_list()}
+
+@app.post("/api/appstore/refresh")
+def appstore_refresh(user: dict = Depends(require_auth), db=Depends(get_db)):
+    items = store.refresh_catalog(force=True)
+    _log(db, user, "appstore.refresh", "catalog")
+    return {"ok": True, "items": items}
 
 
 @app.post("/api/appstore/{item_id}/install")
