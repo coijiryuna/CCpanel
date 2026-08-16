@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import List, Set, Optional
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
-from .deps import _log, app, get_db, require_auth
+from .deps import _log, app, db_conn, require_auth
 
 class PortInfo(BaseModel):
     port: int
@@ -129,7 +131,7 @@ def get_used_ports() -> List[PortInfo]:
     
     # Method 3: Check CCPanel managed ports from database
     try:
-        with get_db() as conn:
+        with db_conn() as conn:
             # Projects ports
             rows = conn.execute("SELECT port, name, app_type FROM projects").fetchall()
             for row in rows:

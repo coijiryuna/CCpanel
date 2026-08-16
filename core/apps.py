@@ -43,6 +43,15 @@ def _run(cmd: list[str], timeout: int = 30, as_www: bool = False) -> subprocess.
     except subprocess.TimeoutExpired as e:
         raise AppError(f"Timeout: {' '.join(cmd)}") from e
 
+
+def _run_as_user(cmd: list[str], cwd: Path, timeout: int = 600, run_user: str = DEFAULT_USER) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise AppError(f"Perintah tidak ditemukan: {cmd[0]}")
+    except subprocess.TimeoutExpired as e:
+        raise AppError(f"Timeout: {' '.join(cmd)}") from e
+
 def _run_in(cmd: list[str], cwd: Path, timeout: int = 600, as_www: bool = False) -> subprocess.CompletedProcess:
     """Jalankan perintah di folder project (install deps dll, lama)."""
     if as_www:
@@ -120,7 +129,7 @@ def _install_deps(app_type: str, root: Path, run_user: str, node_version: str = 
             cd {root} &&
             {npm_command}
         """
-        res = _run_in(["bash", "-lc", nvm_cmd], root, timeout=900, as_www=True)
+        res = _run_in(["bash", "-lc", nvm_cmd], root, timeout=900)
         if res.returncode != 0:
             raise AppError(res.stderr.strip() or f"{npm_command} gagal")
     elif app_type == "python":
@@ -129,19 +138,19 @@ def _install_deps(app_type: str, root: Path, run_user: str, node_version: str = 
             return
         # cek venv project dulu, fallback pip
         venv_pip = root / ".venv" / "bin" / "pip"
-        cmd = [str(venv_pip), "install", "-r", str(req)] if venv_pip.exists() else ["pip", "install", "-r", str(req)]
-        res = _run_in(cmd, root, timeout=900, as_www=True)
+        cmd = [str(venv_pip), "install", "-r", str(req)] if venv_pip.exists() else ["pip", "install", "-r", str(req), "--break-system-packages"]
+        res = _run_in(cmd, root, timeout=900)
         if res.returncode != 0:
             raise AppError(res.stderr.strip() or "pip install -r requirements.txt gagal")
     elif app_type == "go":
         if not (root / "go.mod").exists():
             return
         if (root / "go.sum").exists():
-            res = _run_in(["go", "mod", "download"], root, timeout=900, as_www=True)
+            res = _run_in(["go", "mod", "download"], root, timeout=900)
             if res.returncode != 0:
                 raise AppError(res.stderr.strip() or "go mod download gagal")
         bin_name = root.name
-        res = _run_in(["go", "build", "-o", bin_name, "."], root, timeout=900, as_www=True)
+        res = _run_in(["go", "build", "-o", bin_name, "."], root, timeout=900)
         if res.returncode != 0:
             raise AppError(res.stderr.strip() or "go build gagal")
 

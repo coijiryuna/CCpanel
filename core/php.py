@@ -55,6 +55,14 @@ def _php_block_for(engine: str, domain: str, php_version: str) -> str:
     # nginx (default)
     return _php_location_block(domain, php_version)
 
+
+def _engine_test(engine: str) -> None:
+    mod = webserver_ops.for_engine(engine)
+    fn = getattr(mod, "test", None) or getattr(mod, "nginx_test", None)
+    if fn is None:
+        raise PhpError(f"engine {engine} tidak punya test()")
+    fn()
+
 class PhpError(Exception):
     pass
 
@@ -204,7 +212,7 @@ def remove_php_block(domain: str, vhost: Path | None = None, engine: str | None 
         vh.write_text(new_text)
         eng = engine or _detect_engine(vh)
         try:
-            webserver_ops.for_engine(eng).nginx_test()
+            _engine_test(eng)
         except webserver_ops.WebserverError:
             vh.write_text(text)
             raise
@@ -235,7 +243,7 @@ def insert_php_block(domain: str, php_version: str, vhost: Path | None = None,
             text = text.rstrip() + "\n" + block
     vh.write_text(text)
     try:
-        webserver_ops.for_engine(eng).nginx_test()
+        _engine_test(eng)
     except webserver_ops.WebserverError:
         remove_php_block(domain, vhost, eng)
         raise

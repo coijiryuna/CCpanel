@@ -17,10 +17,12 @@ import zipfile
 from pathlib import Path
 
 from fastapi import Depends, File, HTTPException, Response, UploadFile
+from fastapi.requests import Request
+
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .deps import app, get_db, require_auth
+from .deps import app, require_auth
 from core import apps as apps_ops
 from core import nginx as nginx_ops
 

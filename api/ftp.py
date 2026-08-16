@@ -4,11 +4,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import ftp as ftp_ops
 
-from .deps import _log, app, dt_order, dt_params, dt_response, get_db, require_auth
+from .deps import _log, app, dt_order, dt_params, dt_response, db_conn, require_auth
 
 class FtpCreate(BaseModel):
     username: str
@@ -69,7 +71,7 @@ def list_ftp(
         conds.append("(f.username LIKE ? OR s.domain LIKE ?)")
         args.extend([s, s])
     where = (" WHERE " + " AND ".join(conds)) if conds else ""
-    with get_db() as conn:
+    with db_conn() as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM ftp_accounts"
             + (f" WHERE site_id IN (SELECT id FROM sites WHERE owner_id = ?)" if user["role"] != "admin" else ""),
@@ -85,7 +87,7 @@ def list_ftp(
 
 @app.post("/api/ftp", response_model=FtpResponse)
 def create_ftp(req: FtpCreate, user: dict = Depends(require_auth)) -> FtpResponse:
-    with get_db() as conn:
+    with db_conn() as conn:
         site = conn.execute("SELECT * FROM sites WHERE id = ?", (req.site_id,)).fetchone()
         if site is None:
             raise HTTPException(404, "Site tidak ada")
@@ -107,7 +109,7 @@ def create_ftp(req: FtpCreate, user: dict = Depends(require_auth)) -> FtpRespons
 
 @app.post("/api/ftp/{ftp_id}/reset-password", response_model=FtpResponse)
 def reset_ftp_password(ftp_id: int, user: dict = Depends(require_auth)) -> FtpResponse:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_ftp_access(conn, ftp_id, user)
         try:
             password = ftp_ops.reset_password(row["username"], "")
@@ -120,7 +122,7 @@ def reset_ftp_password(ftp_id: int, user: dict = Depends(require_auth)) -> FtpRe
 
 @app.delete("/api/ftp/{ftp_id}")
 def delete_ftp(ftp_id: int, user: dict = Depends(require_auth)) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_ftp_access(conn, ftp_id, user)
         try:
             ftp_ops.delete_account(row["username"])

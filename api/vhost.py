@@ -5,17 +5,16 @@ from pathlib import Path
 
 from fastapi import Depends, HTTPException
 from fastapi.requests import Request
-
 from core import php as php_ops
 from core import siteconfig as siteconfig_ops
 from core import webserver as webserver_ops
 
-from .deps import _log, app, check_site_access, get_db, require_auth
+from .deps import _log, app, check_site_access, db_conn, require_auth
 
 @app.get("/api/sites/{site_id}/vhost-config")
 def get_vhost_config(site_id: int, user: dict = Depends(require_auth)) -> dict:
     """Isi konfigurasi vhost — untuk tombol Edit Config."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         vh = Path(row["vhost_path"])
         if not vh.exists():
@@ -33,7 +32,7 @@ async def put_vhost_config(site_id: int, req: Request, user: dict = Depends(requ
     except json.JSONDecodeError:
         raise HTTPException(400, "Body bukan JSON valid") from None
     content = body.get("content", "")
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         vh = Path(row["vhost_path"])
         if not vh.exists():
@@ -56,7 +55,7 @@ async def put_vhost_config(site_id: int, req: Request, user: dict = Depends(requ
 def get_site_config(site_id: int, user: dict = Depends(require_auth)) -> dict:
     """State fitur site: rewrite rules, anti-XSS, access log + engine + vhost + backend features.
     Multi mode + backend engine: return DUA vhost (nginx front + backend)."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         domain = row["domain"]
         engine = row["webserver"]
@@ -116,7 +115,7 @@ async def put_site_config(site_id: int, req: Request, user: dict = Depends(requi
     except json.JSONDecodeError:
         raise HTTPException(400, "Body bukan JSON valid") from None
 
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         domain = row["domain"]
         engine = row["webserver"]
@@ -271,10 +270,7 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
     if engine not in webserver_ops.ENGINES:
         raise HTTPException(400, f"Web server tidak valid. Pilihan: {', '.join(webserver_ops.ENGINES)}")
 
-    with get_db() as conn:
-        row = check_site_access(conn, site_id, user)
-        domain = row["domain"]
-        old_engine = row["webserver"]
+    with db_conn() as conn:
         if engine == old_engine:
             return {"ok": True, "engine": engine}
 

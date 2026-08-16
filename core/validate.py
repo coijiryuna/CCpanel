@@ -11,6 +11,7 @@ DOMAIN_RE = re.compile(
 # Nama DB/user MySQL: lowercase + underscore, max 64 (batas MySQL).
 DB_NAME_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 IP_RE = re.compile(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$")
+IPV6_RE = re.compile(r"^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$")
 
 
 def valid_domain(domain: str) -> bool:
@@ -22,4 +23,6 @@ def valid_db_name(name: str) -> bool:
 
 def valid_ip(ip: str) -> bool:
     m = IP_RE.fullmatch(ip)
-    return bool(m) and all(0 <= int(o) <= 255 for o in m.groups())
+    if m and all(0 <= int(o) <= 255 for o in m.groups()):
+        return True
+    return bool(IPV6_RE.fullmatch(ip))

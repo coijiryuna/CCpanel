@@ -41,8 +41,19 @@ def _data_dir() -> Path:
 def _db_path() -> Path:
     return _data_dir() / "ccpanel.db"
 
-@contextmanager
 def get_db() -> Generator[sqlite3.Connection, None, None]:
+    conn = sqlite3.connect(_db_path(), timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def db_conn() -> Generator[sqlite3.Connection, None, None]:
     conn = sqlite3.connect(_db_path(), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -95,7 +106,7 @@ def dt_order(columns: list[str], order_col: str | None = None, order_dir: str = 
 
 def init_db() -> None:
     _data_dir().mkdir(parents=True, exist_ok=True)
-    with get_db() as conn:
+    with db_conn() as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -288,7 +299,7 @@ def _log(conn: sqlite3.Connection | None, user: dict | str, action: str, detail:
     if conn is not None:
         conn.execute("INSERT INTO audit_log (ts, user, action, detail, ip) VALUES (?, ?, ?, ?, ?)", row)
     else:
-        with get_db() as conn2:
+        with db_conn() as conn2:
             conn2.execute("INSERT INTO audit_log (ts, user, action, detail, ip) VALUES (?, ?, ?, ?, ?)", row)
 
 def seed_admin(conn: sqlite3.Connection) -> None:
@@ -316,7 +327,7 @@ def create_token(username: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 def _get_user(username: str) -> sqlite3.Row | None:
-    with get_db() as conn:
+    with db_conn() as conn:
         return conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
 
 def _is_valid_ip(addr: str) -> bool:

@@ -20,7 +20,7 @@ from core import nginx as nginx_ops
 from core import siteconfig as siteconfig_ops
 from core import validate
 
-from .deps import _log, app, dt_order, dt_params, dt_response, get_db, require_auth
+from .deps import _log, app, dt_order, dt_params, dt_response, db_conn, require_auth
 
 PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
@@ -107,7 +107,7 @@ def list_projects(
         conds.append("(name LIKE ? OR app_type LIKE ? OR remark LIKE ?)")
         args.extend([s, s, s])
     where = (" WHERE " + " AND ".join(conds)) if conds else ""
-    with get_db() as conn:
+    with db_conn() as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM projects"
             + (f" WHERE owner_id = ?" if user["role"] != "admin" else ""),
@@ -149,7 +149,7 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
     # auto-detect entry dari package.json / app.py kalau kosong
     entry = apps_ops.resolve_entry(req.app_type, root, entry)
 
-    with get_db() as conn:
+    with db_conn() as conn:
         if conn.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
             raise HTTPException(409, f"Project {name} sudah ada")
         if domain:
@@ -202,7 +202,7 @@ def create_project(req: ProjectCreate, user: dict = Depends(require_auth)) -> di
 
 @app.put("/api/projects/{project_id}", response_model=dict)
 def update_project(project_id: int, req: ProjectUpdate, user: dict = Depends(require_auth)) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         app_type = (req.app_type or row["app_type"]).lower()
         port = req.port or row["port"]
@@ -267,7 +267,7 @@ def update_project(project_id: int, req: ProjectUpdate, user: dict = Depends(req
 
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: int, user: dict = Depends(require_auth)) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         try:
             apps_ops.remove_standalone(row["name"], row["app_type"])
@@ -283,7 +283,7 @@ def delete_project(project_id: int, user: dict = Depends(require_auth)) -> dict:
 @app.post("/api/projects/{project_id}/action")
 def project_action(project_id: int, req: dict, user: dict = Depends(require_auth)) -> dict:
     action = (req.get("action") or "").strip()
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         try:
             apps_ops.standalone_action(row["name"], row["app_type"], action)
@@ -296,7 +296,7 @@ def project_action(project_id: int, req: dict, user: dict = Depends(require_auth
 
 @app.get("/api/projects/{project_id}/log")
 def project_log(project_id: int, lines: int = 100, user: dict = Depends(require_auth)) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         try:
             text = apps_ops.standalone_log_tail(row["name"], row["app_type"], lines)
@@ -317,7 +317,7 @@ def attach_project_domain(project_id: int, req: ProjectDomain, user: dict = Depe
     domain = (req.domain or "").strip().lower()
     if not validate.valid_domain(domain):
         raise HTTPException(400, f"Domain tidak valid: {domain}")
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         if row["domain"]:
             raise HTTPException(409, f"Project sudah punya domain: {row['domain']} — lepas dulu")
@@ -339,7 +339,7 @@ def attach_project_domain(project_id: int, req: ProjectDomain, user: dict = Depe
 
 @app.delete("/api/projects/{project_id}/domain")
 def detach_project_domain(project_id: int, user: dict = Depends(require_auth)) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         if not row["domain"]:
             raise HTTPException(400, "Project tidak punya domain")
@@ -366,7 +366,7 @@ def _project_vhost(row) -> Path:
 @app.get("/api/projects/{project_id}/webconfig")
 def get_project_webconfig(project_id: int, user: dict = Depends(require_auth)) -> dict:
     """State fitur web project berdomain: rewrite, anti-XSS, access log, vhost."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         vh = _project_vhost(row)
         feats = siteconfig_ops.state(row["domain"])
@@ -389,7 +389,7 @@ async def put_project_webconfig(project_id: int, req: Request, user: dict = Depe
     except json.JSONDecodeError:
         raise HTTPException(400, "Body bukan JSON valid") from None
 
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         vh = _project_vhost(row)
         domain = row["domain"]
@@ -432,7 +432,7 @@ def _project_compose_paths(row) -> tuple[Path, Path]:
 @app.get("/api/projects/{project_id}/compose")
 def get_project_compose(project_id: int, user: dict = Depends(require_auth)) -> dict:
     """Baca docker-compose.yml + .env project docker. 400 kalau bukan docker."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         if row["app_type"] != "docker":
             raise HTTPException(400, "Fitur ini khusus project docker (app_type=docker)")
@@ -456,7 +456,7 @@ async def put_project_compose(project_id: int, req: Request, user: dict = Depend
     except json.JSONDecodeError:
         raise HTTPException(400, "Body bukan JSON valid") from None
 
-    with get_db() as conn:
+    with db_conn() as conn:
         row = _check_project(conn, project_id, user)
         if row["app_type"] != "docker":
             raise HTTPException(400, "Fitur ini khusus project docker (app_type=docker)")

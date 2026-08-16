@@ -13,6 +13,7 @@ import os
 import traceback
 from datetime import datetime, timezone
 
+# MENJADI (BENAR):
 from fastapi import HTTPException
 from fastapi.requests import Request
 from fastapi.staticfiles import StaticFiles
@@ -21,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse
 # register semua route API (import = register ke app via decorator)
 from api import deps
 from api import __init__ as _routes  # noqa: F401
-from api.deps import STATIC_DIR, app, init_db
+from api.deps import STATIC_DIR, app, db_conn, init_db
 from core import database as database_ops
 from core import webserver as webserver_ops
 
@@ -52,37 +53,44 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": detail},
     )
 
-init_db()
+import asyncio
 
-# engine web server aktif: env override (testing), kalau tidak dari DB settings
-if not os.environ.get("CCPANEL_WEBSERVER"):
-    with deps.get_db() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = 'webserver'").fetchone()
-        if row:
-            webserver_ops.set_active(row["value"])
-        else:
-            # Default to nginx if no setting found
-            webserver_ops.set_active("nginx")
+async def _init_app():
+    init_db()
 
-# mode web server (single/multi): env override (testing), kalau tidak dari DB
-if not os.environ.get("CCPANEL_WEBSERVER_MODE"):
-    with deps.get_db() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = 'webserver_mode'").fetchone()
-        if row and row["value"] in webserver_ops.MODES:
-            webserver_ops.set_mode(row["value"])
-        else:
-            # Default to single if no setting found
-            webserver_ops.set_mode("single")
+    # engine web server aktif: env override (testing), kalau tidak dari DB settings
+    if not os.environ.get("CCPANEL_WEBSERVER"):
+        with db_conn() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key = 'webserver'").fetchone()
+            if row:
+                webserver_ops.set_active(row["value"])
+            else:
+                # Default to nginx if no setting found
+                webserver_ops.set_active("nginx")
 
-# engine database aktif: env override (testing), kalau tidak dari DB settings
-if not os.environ.get("CCPANEL_DATABASE"):
-    with deps.get_db() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = 'database'").fetchone()
-        if row:
-            database_ops.set_active(row["value"])
-        else:
-            # Default to mysql if no setting found
-            database_ops.set_active("mysql")
+    # mode web server (single/multi): env override (testing), kalau tidak dari DB
+    if not os.environ.get("CCPANEL_WEBSERVER_MODE"):
+        with db_conn() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key = 'webserver_mode'").fetchone()
+            if row and row["value"] in webserver_ops.MODES:
+                webserver_ops.set_mode(row["value"])
+            else:
+                # Default to single if no setting found
+                webserver_ops.set_mode("single")
+
+    # engine database aktif: env override (testing), kalau tidak dari DB settings
+    if not os.environ.get("CCPANEL_DATABASE"):
+        with db_conn() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key = 'database'").fetchone()
+            if row:
+                database_ops.set_active(row["value"])
+            else:
+                # Default to mysql if no setting found
+                database_ops.set_active("mysql")
+
+@app.on_event("startup")
+async def _startup():
+    await _init_app()
 
 # ----------------------------------------------------------------- static
 # Mount TERAKHIR — setelah semua route API. Mount "/" menangkap semua request

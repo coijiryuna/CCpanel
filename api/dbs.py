@@ -5,6 +5,8 @@ import secrets
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import database as database_ops
@@ -17,7 +19,7 @@ from core import pg_admin as pg_admin_ops
 from core import mongo_admin as mongo_admin_ops
 from core import db_service
 
-from .deps import _log, app, check_db_access, dt_order, dt_params, dt_response, get_db, require_auth, require_admin
+from .deps import _log, app, check_db_access, dt_order, dt_params, dt_response, db_conn, require_auth, require_admin
 
 class DbCreate(BaseModel):
     db_name: str
@@ -80,7 +82,7 @@ def create_db(req: DbCreate, user: dict = Depends(require_auth)) -> DbResponse:
         password = (req.password or secrets.token_urlsafe(12)).strip()
         if not password or len(password) > 128:
             raise HTTPException(400, "Password tidak valid (1-128 char)")
-    with get_db() as conn:
+    with db_conn() as conn:
         if conn.execute("SELECT 1 FROM dbs WHERE db_name = ?", (db_name,)).fetchone():
             raise HTTPException(409, "DB sudah ada")
         if req.site_id is not None:
@@ -138,7 +140,7 @@ def list_dbs(
         args.extend([s, s])
     all_conds = conds + search_conds
     where = (" WHERE " + " AND ".join(all_conds)) if all_conds else ""
-    with get_db() as conn:
+    with db_conn() as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM dbs" + (f" WHERE {' AND '.join(conds)}" if conds else ""),
             args[:len(conds)],
@@ -236,7 +238,7 @@ def mysql_set_variable(req: GlobalVarRequest, user: dict = Depends(require_admin
         mysql_admin_ops.set_global(req.variable, req.value)
     except mysql_admin_ops.MysqlAdminError as e:
         raise HTTPException(400, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "mysql.set-global", f"{req.variable} = {req.value}")
     return {"ok": True, "variable": req.variable, "value": req.value}
 
@@ -248,7 +250,7 @@ def mysql_optimize(req: PresetRequest, user: dict = Depends(require_admin)) -> d
         r = mysql_admin_ops.apply_preset(req.name)
     except mysql_admin_ops.MysqlAdminError as e:
         raise HTTPException(400, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "mysql.optimize", req.name)
     return r
 
@@ -266,7 +268,7 @@ def mysql_config_save(req: ConfigRequest, user: dict = Depends(require_admin)) -
         mysql_admin_ops.write_config(req.content)
     except mysql_admin_ops.MysqlAdminError as e:
         raise HTTPException(400, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "mysql.config", mysql_admin_ops.CONF_PATH.name)
     return {"ok": True, "path": str(mysql_admin_ops.CONF_PATH)}
 
@@ -301,7 +303,7 @@ def pg_set_variable(req: GlobalVarRequest, user: dict = Depends(require_admin)) 
         pg_admin_ops.set_global(req.variable, req.value)
     except pg_admin_ops.PgAdminError as e:
         raise HTTPException(400, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "pg.set-global", f"{req.variable} = {req.value}")
     return {"ok": True, "variable": req.variable, "value": req.value}
 
@@ -313,7 +315,7 @@ def pg_optimize(req: PresetRequest, user: dict = Depends(require_admin)) -> dict
         r = pg_admin_ops.apply_preset(req.name)
     except pg_admin_ops.PgAdminError as e:
         raise HTTPException(400, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "pg.optimize", req.name)
     return r
 
@@ -334,7 +336,7 @@ def pg_config_save(req: ConfigRequest, user: dict = Depends(require_admin)) -> d
         pg_admin_ops.write_config(req.content)
     except pg_admin_ops.PgAdminError as e:
         raise HTTPException(400, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "pg.config", pg_admin_ops._cluster_dir().name)
     return {"ok": True}
 
@@ -384,7 +386,7 @@ def mongo_set_parameter(req: GlobalVarRequest, user: dict = Depends(require_admi
         mongo_admin_ops.set_parameter(req.variable, req.value)
     except mongo_admin_ops.MongoAdminError as e:
         raise HTTPException(400, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "mongo.set-parameter", f"{req.variable} = {req.value}")
     return {"ok": True, "variable": req.variable, "value": req.value}
 
@@ -413,14 +415,14 @@ def set_root_password(
         detail = f"postgresql {pg_ops.PG_USER}"
     else:
         raise HTTPException(400, f"Engine {engine} tidak punya root password")
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "db.root-password", detail)
     return {"ok": True}
 
 
 @app.post("/api/dbs/{db_id}/reset-password", response_model=DbResponse)
 def reset_db_password(db_id: int, user: dict = Depends(require_auth)) -> DbResponse:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_db_access(conn, db_id, user)
         password = secrets.token_urlsafe(12)
         eng = database_ops.for_engine(row["db_type"])
@@ -435,7 +437,7 @@ def reset_db_password(db_id: int, user: dict = Depends(require_auth)) -> DbRespo
 
 @app.delete("/api/dbs/{db_id}")
 def delete_db(db_id: int, user: dict = Depends(require_auth)) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_db_access(conn, db_id, user)
         eng = database_ops.for_engine(row["db_type"])
         try:

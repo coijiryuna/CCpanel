@@ -7,12 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import cms as cms_ops
 from core import database, validate
 
-from .deps import _log, app, check_site_access, get_db, require_auth
+from .deps import _log, app, check_site_access, db_conn, require_auth
 
 class CmsInstall(BaseModel):
     cms: str
@@ -32,7 +34,7 @@ def cms_catalog(user: dict = Depends(require_auth)) -> dict:
 def cms_detect(site_id: int, user: dict = Depends(require_auth)) -> dict:
     """Deteksi CMS terpasang di root site."""
     import re as _re
-    with get_db() as conn:
+    with db_conn() as conn:
         site = check_site_access(conn, site_id, user)
         root = Path(site["root_path"])
         cms = cms_ops.detect(root)
@@ -89,13 +91,13 @@ def cms_install(req: CmsInstall, user: dict = Depends(require_auth)) -> dict:
         raise HTTPException(400, "Password DB tidak valid (1-128 char)")
 
     # site harus ada + akses
-    with get_db() as conn:
+    with db_conn() as conn:
         site = check_site_access(conn, int(_site_id_by_domain(conn, domain)), user)
     if not Path(site["root_path"]).is_dir():
         raise HTTPException(400, f"Folder root site tidak ada: {site['root_path']}")
 
     # DB name harus unik
-    with get_db() as conn:
+    with db_conn() as conn:
         if conn.execute("SELECT 1 FROM dbs WHERE db_name = ?", (db_name,)).fetchone():
             raise HTTPException(409, f"Nama DB sudah dipakai: {db_name}")
 
@@ -107,7 +109,7 @@ def cms_install(req: CmsInstall, user: dict = Depends(require_auth)) -> dict:
         raise HTTPException(500, str(e)) from e
 
     # register DB di panel (DB sudah dibuat di core.cms.install)
-    with get_db() as conn:
+    with db_conn() as conn:
         conn.execute(
             "INSERT INTO dbs (site_id, db_name, db_user, db_pass, db_host, db_type, owner_id, created_at) "
             "VALUES (?, ?, ?, ?, 'localhost', 'mysql', NULL, ?)",

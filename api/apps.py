@@ -20,7 +20,7 @@ from .deps import (
     dt_order,
     dt_params,
     dt_response,
-    get_db,
+    db_conn,
     require_auth,
     validate_subpath,
 )
@@ -87,7 +87,7 @@ def list_apps(
     user: dict = Depends(require_auth),
 ) -> list[AppResponse] | dict:
     start, length, draw = dt_params(start, length, draw)
-    with get_db() as conn:
+    with db_conn() as conn:
         site = check_site_access(conn, site_id, user)
         conds: list[str] = ["site_id = ?"]
         args: list = [site_id]
@@ -110,7 +110,7 @@ def list_apps(
 @app.post("/api/sites/{site_id}/apps", response_model=AppResponse)
 def create_app(site_id: int, req: AppCreate, user: dict = Depends(require_auth)) -> AppResponse:
     """Pasang aplikasi per-site. nginx-only (proxy subpath syntax nginx)."""
-    with get_db() as conn:
+    with db_conn() as conn:
         site = check_site_access(conn, site_id, user)
         _check_nginx(site)
         if conn.execute("SELECT 1 FROM site_apps WHERE site_id = ?", (site_id,)).fetchone():
@@ -166,7 +166,7 @@ async def app_action(site_id: int, req: Request, user: dict = Depends(require_au
     except json.JSONDecodeError:
         raise HTTPException(400, "Body bukan JSON valid") from None
     action = body.get("action", "")
-    with get_db() as conn:
+    with db_conn() as conn:
         site = check_site_access(conn, site_id, user)
         row = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (site_id,)).fetchone()
         if row is None:
@@ -181,7 +181,7 @@ async def app_action(site_id: int, req: Request, user: dict = Depends(require_au
 
 @app.get("/api/sites/{site_id}/apps/log")
 def app_log(site_id: int, lines: int = 100, user: dict = Depends(require_auth)) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         site = check_site_access(conn, site_id, user)
         row = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (site_id,)).fetchone()
         if row is None:
@@ -195,7 +195,7 @@ def app_log(site_id: int, lines: int = 100, user: dict = Depends(require_auth)) 
 @app.put("/api/sites/{site_id}/apps", response_model=AppResponse)
 def update_app(site_id: int, req: AppCreate, user: dict = Depends(require_auth)) -> AppResponse:
     """Ubah port/entry/subpath. Tulis ulang unit + proxy."""
-    with get_db() as conn:
+    with db_conn() as conn:
         site = check_site_access(conn, site_id, user)
         _check_nginx(site)
         row = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (site_id,)).fetchone()
@@ -234,7 +234,7 @@ def update_app(site_id: int, req: AppCreate, user: dict = Depends(require_auth))
 
 @app.delete("/api/sites/{site_id}/apps")
 def delete_app(site_id: int, user: dict = Depends(require_auth)) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         site = check_site_access(conn, site_id, user)
         row = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (site_id,)).fetchone()
         if row is None:

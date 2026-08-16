@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
 
 from core import cert as cert_ops
 
-from .deps import _log, app, check_site_access, get_db, require_admin, require_auth
+from .deps import _log, app, check_site_access, db_conn, require_admin, require_auth
 
 @app.post("/api/sites/{site_id}/ssl")
 def install_ssl(site_id: int, user: dict = Depends(require_auth)) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
     try:
         cert_ops.install_ssl(row["domain"])

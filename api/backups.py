@@ -5,12 +5,14 @@ import shutil
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import backup as backup_ops
 from core import webserver as webserver_ops
 
-from .deps import _log, app, dt_params, dt_response, get_db, require_admin
+from .deps import _log, app, db_conn, dt_params, dt_response, require_admin
 
 class BackupItem(BaseModel):
     name: str
@@ -53,7 +55,7 @@ def list_backups(
 @app.post("/api/backups/site/{site_id}")
 def backup_site(site_id: int, user: dict = Depends(require_admin)) -> dict:
     """Backup folder root site ke tar.gz."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = conn.execute("SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Site tidak ada")
@@ -67,7 +69,7 @@ def backup_site(site_id: int, user: dict = Depends(require_admin)) -> dict:
 @app.post("/api/backups/db/{db_id}")
 def backup_db(db_id: int, user: dict = Depends(require_admin)) -> dict:
     """Backup database ke sql.gz via mysqldump."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = conn.execute("SELECT * FROM dbs WHERE id = ?", (db_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "DB tidak ada")
@@ -88,7 +90,7 @@ def restore_backup(name: str, user: dict = Depends(require_admin)) -> dict:
         except backup_ops.BackupError as e:
             raise HTTPException(500, str(e)) from e
         domain = root.name
-        with get_db() as conn:
+        with db_conn() as conn:
             existing = conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone()
             if not existing:
                 try:

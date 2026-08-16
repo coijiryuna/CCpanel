@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import terminal as terminal_ops
 
-from .deps import _log, app, dt_order, dt_params, dt_response, get_db, require_admin
+from .deps import _log, app, dt_order, dt_params, dt_response, db_conn, require_admin
 
 class LogEntry(BaseModel):
     id: int
@@ -36,7 +38,7 @@ def list_logs(
         conds.append("(user LIKE ? OR action LIKE ? OR detail LIKE ? OR ip LIKE ?)")
         args.extend([s, s, s, s])
     where = (" WHERE " + " AND ".join(conds)) if conds else ""
-    with get_db() as conn:
+    with db_conn() as conn:
         total = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
         filtered = conn.execute("SELECT COUNT(*) FROM audit_log" + where, args).fetchone()[0]
         if length > 0:

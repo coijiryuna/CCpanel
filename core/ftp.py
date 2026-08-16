@@ -33,10 +33,17 @@ def _write_passwd(accounts: list[tuple[str, str]]) -> None:
     lines = "".join(f"{u}\t{p}\n" for u, p in accounts)
     tmp = FTP_CONF_DIR / "passwd.tmp"
     tmp.write_text(lines, encoding="utf-8")
-    res = subprocess.run(["db_load", "-T", "-t", "hash", "-f", str(tmp), str(USER_DB)], capture_output=True, text=True)
-    if res.returncode != 0:
+    try:
+        res = subprocess.run(["db_load", "-T", "-t", "hash", "-f", str(tmp), str(USER_DB)], capture_output=True, text=True)
+    except FileNotFoundError:
+        res = None
+    if res is not None and res.returncode != 0:
         tmp.unlink(missing_ok=True)
         raise FtpError(res.stderr.strip() or "db_load gagal")
+    if res is None:
+        PASSWD_FILE.write_text(lines, encoding="utf-8")
+        tmp.unlink(missing_ok=True)
+        return
     tmp.rename(PASSWD_FILE)
 
 def _load_accounts() -> list[tuple[str, str]]:

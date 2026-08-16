@@ -6,11 +6,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import cron as cron_ops
 
-from .deps import _log, app, get_db, require_admin, require_auth
+from .deps import _log, app, db_conn, require_admin, require_auth
 
 SCHEDULE_RE = re.compile(r"^(\*|[0-9]+)(\s+(\*|[0-9]+)){4}$")
 KINDS = ("command", "script", "url")
@@ -64,7 +66,7 @@ def _sync_all(conn) -> None:
 @app.get("/api/cron/jobs")
 def list_cron_jobs(user: dict = Depends(require_auth)) -> list[dict]:
     """Daftar cron job custom. Admin lihat semua, client hanya punya sendiri."""
-    with get_db() as conn:
+    with db_conn() as conn:
         if user["role"] == "admin":
             rows = conn.execute("SELECT * FROM cron_jobs ORDER BY id DESC").fetchall()
         else:
@@ -105,7 +107,7 @@ def create_cron_job(req: CronJobCreate, user: dict = Depends(require_auth)) -> d
         banned = ("sudo", "su ", "rm -rf", ":(){:", "mkfs", "> /dev/sd", "/etc/", "/root/")
         if any(b in low for b in banned):
             raise HTTPException(403, "Perintah dilarang untuk user biasa")
-    with get_db() as conn:
+    with db_conn() as conn:
         cur = conn.execute(
             "INSERT INTO cron_jobs (name, schedule, command, kind, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (name, schedule, command, kind,
@@ -123,7 +125,7 @@ def create_cron_job(req: CronJobCreate, user: dict = Depends(require_auth)) -> d
 @app.delete("/api/cron/jobs/{job_id}")
 def delete_cron_job(job_id: int, user: dict = Depends(require_auth)) -> dict:
     """Hapus cron job custom + line crontab-nya."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = conn.execute("SELECT * FROM cron_jobs WHERE id = ?", (job_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Cron job tidak ada")

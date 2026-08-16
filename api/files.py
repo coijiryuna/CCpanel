@@ -13,10 +13,12 @@ import zipfile
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
+from fastapi.requests import Request
+
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .deps import app, get_db, require_auth
+from .deps import app, db_conn, require_auth
 
 MAX_TEXT_SIZE = 2 * 1024 * 1024  # 2 MB — batas baca/tulis file teks
 
@@ -64,7 +66,7 @@ class ChownReq(BaseModel):
 NAME_RE = re.compile(r"^[^/\\\x00]{1,255}$")
 
 def _safe_site_root(site_id: int, user: dict | None = None) -> Path:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = conn.execute("SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
     if row is None:
         raise HTTPException(404, "Site tidak ada")

@@ -7,7 +7,7 @@ from fastapi.requests import Request
 
 from pydantic import BaseModel
 
-from .deps import _client_ip, _log, app, create_token, get_db, require_auth
+from .deps import _client_ip, _log, app, create_token, db_conn, require_auth
 
 class LoginRequest(BaseModel):
     username: str
@@ -20,7 +20,7 @@ class TokenResponse(BaseModel):
 @app.post("/api/login", response_model=TokenResponse)
 def login(req: LoginRequest, request: Request) -> TokenResponse:
     ip = _client_ip(request)
-    with get_db() as conn:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT password_hash FROM users WHERE username = ?", (req.username,)
         ).fetchone()
@@ -40,6 +40,6 @@ def dashboard(user: dict = Depends(require_auth)) -> dict:
     """Statistik panel. Admin: semua site. Client: site miliknya saja."""
     from core import monitor as monitor_ops
 
-    with get_db() as conn:
+    with db_conn() as conn:
         owner_id = None if user["role"] == "admin" else user["id"]
         return monitor_ops.dashboard(conn, owner_id)

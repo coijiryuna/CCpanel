@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import hotlink as hotlink_ops
@@ -15,7 +17,7 @@ from core import validate
 from core import waf as waf_ops
 from core import webserver as webserver_ops
 
-from .deps import _log, app, check_site_access, dt_order, dt_params, dt_response, get_db, require_auth
+from .deps import _log, app, check_site_access, dt_order, dt_params, dt_response, db_conn, require_auth
 
 PROJECT_TYPES = ["static", "php"]
 
@@ -97,7 +99,7 @@ def delete_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
     from core import apps as apps_ops
     from core import php as php_ops
 
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         eng = webserver_ops.for_engine(row["webserver"])
         try:
@@ -156,7 +158,7 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
     if engine not in webserver_ops.ENGINES:
         raise HTTPException(400, f"Web server tidak valid. Pilihan: {', '.join(webserver_ops.ENGINES)}")
 
-    with get_db() as conn:
+    with db_conn() as conn:
         if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone():
             raise HTTPException(409, "Domain sudah ada")
         for d in extra:
@@ -307,7 +309,7 @@ def list_sites(
         args.extend([s, s, s])
     all_conds = conds + search_conds
     where = (" WHERE " + " AND ".join(all_conds)) if all_conds else ""
-    with get_db() as conn:
+    with db_conn() as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM sites" + (f" WHERE {' AND '.join(conds)}" if conds else ""),
             args[:len(conds)],
@@ -346,7 +348,7 @@ def fix_site_ownership(site_id: int, user: dict = Depends(require_auth)) -> dict
     Use this to fix LiteSpeed/Apache warnings on existing vhosts that were
     created with root ownership. Requires running as root.
     """
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         eng = webserver_ops.for_engine(row["webserver"])
         try:
@@ -357,7 +359,7 @@ def fix_site_ownership(site_id: int, user: dict = Depends(require_auth)) -> dict
     return {"ok": True, "message": "Vhost ownership fixed"}
 
 def _set_enabled(site_id: int, enabled: bool, user: dict) -> dict:
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         eng = webserver_ops.for_engine(row["webserver"])
         try:
@@ -371,7 +373,7 @@ def _set_enabled(site_id: int, enabled: bool, user: dict) -> dict:
 @app.post("/api/sites/{site_id}/waf")
 def waf_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
     """Toggle WAF per-site. Khusus engine nginx (rules `if` nginx)."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["webserver"] != "nginx":
             raise HTTPException(400, f"WAF hanya untuk site nginx (site ini: {row['webserver']})")
@@ -390,7 +392,7 @@ def waf_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
 @app.post("/api/sites/{site_id}/hotlink")
 def hotlink_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
     """Toggle hotlink protection per-site. Khusus engine nginx (valid_referers)."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["webserver"] != "nginx":
             raise HTTPException(400, f"Hotlink hanya untuk site nginx (site ini: {row['webserver']})")
@@ -415,7 +417,7 @@ def update_site_php(site_id: int, req: SitePhpUpdate, user: dict = Depends(requi
     valid_versions = ["static"] + php_ops.PHP_VERSIONS
     if req.php_version not in valid_versions:
         raise HTTPException(400, f"PHP version tidak valid. Pilihan: {', '.join(valid_versions)}")
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         old_version = row["php_version"]
         try:
@@ -435,7 +437,7 @@ class PhpIniUpdate(BaseModel):
 @app.get("/api/sites/{site_id}/php-config")
 def get_site_php_config(site_id: int, user: dict = Depends(require_auth)) -> dict:
     """Get PHP configuration for a site: ini, pool options, extensions."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
             raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
@@ -452,7 +454,7 @@ def get_site_php_config(site_id: int, user: dict = Depends(require_auth)) -> dic
 @app.put("/api/sites/{site_id}/php-config")
 def update_site_php_config(site_id: int, req: PhpIniUpdate, user: dict = Depends(require_auth)) -> dict:
     """Update PHP ini settings for a site's PHP version."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
             raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
@@ -474,7 +476,7 @@ class PhpPoolUpdate(BaseModel):
 @app.put("/api/sites/{site_id}/php-pool")
 def update_site_php_pool(site_id: int, req: PhpPoolUpdate, user: dict = Depends(require_auth)) -> dict:
     """Update PHP-FPM pool options for a site."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
             raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
@@ -496,7 +498,7 @@ class PhpExtensionAction(BaseModel):
 @app.post("/api/sites/{site_id}/php-extensions/enable")
 def enable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
     """Enable PHP extension for site's PHP version."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
             raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
@@ -510,7 +512,7 @@ def enable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict 
 @app.post("/api/sites/{site_id}/php-extensions/disable")
 def disable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
     """Disable PHP extension for site's PHP version."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
             raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
@@ -525,7 +527,7 @@ def disable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict
 def install_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
     """Install PHP extension via apt untuk site's PHP version. Async + live output."""
     import time as _t
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["php_version"] == "static" or row["php_version"] not in php_ops.PHP_VERSIONS:
             raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
@@ -556,7 +558,7 @@ def add_domain(site_id: int, req: DomainAdd, user: dict = Depends(require_auth))
     domain = req.domain.strip().lower()
     if not validate.valid_domain(domain):
         raise HTTPException(400, "Domain tidak valid")
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         # domain utama site lain? site_domains lain?
         if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone():
@@ -580,7 +582,7 @@ def add_domain(site_id: int, req: DomainAdd, user: dict = Depends(require_auth))
 def remove_domain(site_id: int, domain: str, user: dict = Depends(require_auth)) -> dict:
     """Lepas domain tambahan. Domain utama (sites.domain) tidak bisa dihapus."""
     domain = domain.strip().lower()
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["domain"] == domain:
             raise HTTPException(400, "Domain utama tidak bisa dihapus lewat sini")
@@ -606,7 +608,7 @@ class ProxyToggle(BaseModel):
 def toggle_proxy(site_id: int, req: ProxyToggle, user: dict = Depends(require_auth)) -> dict:
     """Mode proxy penuh: vhost listen di port site + location / -> localhost:port.
     Butuh site punya port. Nginx-only."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["webserver"] != "nginx":
             raise HTTPException(400, f"Proxy hanya untuk site nginx (site ini: {row['webserver']})")
@@ -632,7 +634,7 @@ def update_site_port(site_id: int, req: PortUpdate, user: dict = Depends(require
     langsung ke vhost (listen + proxy_pass)."""
     if not 1 <= req.port <= 65535:
         raise HTTPException(400, "Port tidak valid (1-65535)")
-    with get_db() as conn:
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["webserver"] != "nginx":
             raise HTTPException(400, f"Proxy hanya untuk site nginx (site ini: {row['webserver']})")

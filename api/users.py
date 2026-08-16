@@ -6,11 +6,13 @@ from datetime import datetime, timezone
 
 import bcrypt
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import validate
 
-from .deps import _log, app, dt_order, dt_params, dt_response, get_db, require_admin
+from .deps import _log, app, dt_order, dt_params, dt_response, db_conn, require_admin
 
 class UserCreate(BaseModel):
     username: str
@@ -41,7 +43,7 @@ def list_users(
         conds.append("(username LIKE ? OR role LIKE ?)")
         args.extend([s, s])
     where = (" WHERE " + " AND ".join(conds)) if conds else ""
-    with get_db() as conn:
+    with db_conn() as conn:
         total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         filtered = conn.execute("SELECT COUNT(*) FROM users" + where, args).fetchone()[0]
         rows = conn.execute(
@@ -61,7 +63,7 @@ def create_user(req: UserCreate, user: dict = Depends(require_admin)) -> UserRes
         raise HTTPException(400, "Role harus admin atau client")
     if not req.password or len(req.password) < 6 or len(req.password) > 128:
         raise HTTPException(400, "Password 6-128 char")
-    with get_db() as conn:
+    with db_conn() as conn:
         if conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
             raise HTTPException(409, "Username sudah ada")
         pw_hash = bcrypt.hashpw(req.password.encode(), bcrypt.gensalt()).decode()
@@ -76,7 +78,7 @@ def create_user(req: UserCreate, user: dict = Depends(require_admin)) -> UserRes
 @app.delete("/api/users/{user_id}")
 def delete_user(user_id: int, user: dict = Depends(require_admin)) -> dict:
     """Hapus user. Site miliknya jadi tak bertuan (owner_id NULL)."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "User tidak ada")
@@ -92,7 +94,7 @@ def delete_user(user_id: int, user: dict = Depends(require_admin)) -> dict:
 def reset_user_password(user_id: int, user: dict = Depends(require_admin)) -> dict:
     """Reset password user client. Return password baru."""
     password = secrets.token_urlsafe(12)
-    with get_db() as conn:
+    with db_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "User tidak ada")

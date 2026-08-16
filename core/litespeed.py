@@ -287,14 +287,14 @@ def create_site(domain: str, running_dir: str = "") -> Path:
     try:
         (root / "index.html").write_text(DEFAULT_INDEX.format(domain=domain))
         _write_vhost(domain, root, running_dir)
-        nginx_test()
+        test()
     except Exception as e:
         vhost_path(domain).unlink(missing_ok=True)
         shutil.rmtree(root, ignore_errors=True)
         if isinstance(e, WebserverError):
             raise
         raise WebserverError(f"create_site failed: {e}") from e
-    nginx_reload()
+    reload()
     return root
 
 
@@ -306,11 +306,11 @@ def activate_site(domain: str, running_dir: str = "") -> None:
         raise WebserverError(f"vhost {vhost_path(domain)} sudah ada")
     _write_vhost(domain, root, running_dir)
     try:
-        nginx_test()
+        test()
     except WebserverError:
         vhost_path(domain).unlink(missing_ok=True)
         raise
-    nginx_reload()
+    reload()
 
 
 def fix_vhost_ownership(domain: str) -> None:
@@ -349,14 +349,14 @@ def set_enabled(domain: str, enabled: bool) -> None:
             raise WebserverError(f"vhost {vh} tidak ada")
         vh.rename(disabled)
     try:
-        nginx_test()
+        test()
     except WebserverError:
         if enabled:
             vh.rename(disabled)
         else:
             disabled.rename(vh)
         raise
-    nginx_reload()
+    reload()
 
 
 def remove_vhost(domain: str) -> None:
@@ -366,12 +366,12 @@ def remove_vhost(domain: str) -> None:
     if backup is not None:
         vh.unlink()
     try:
-        nginx_test()
+        test()
     except WebserverError:
         if backup is not None:
             vh.write_text(backup)
         raise
-    nginx_reload()
+    reload()
 
 def remove_site(domain: str) -> None:
     vh = vhost_path(domain)
@@ -379,12 +379,12 @@ def remove_site(domain: str) -> None:
     if backup is not None:
         vh.unlink()
     try:
-        nginx_test()
+        test()
     except WebserverError:
         if backup is not None:
             vh.write_text(backup)
         raise
-    nginx_reload()
+    reload()
 
     root = root_path(domain)
     if root.exists():
@@ -418,7 +418,7 @@ def restore_site(trash_name: str) -> str:
     try:
         shutil.move(str(src), str(root))
         _write_vhost(domain, root)
-        nginx_test()
+        test()
     except Exception as e:
         vh.unlink(missing_ok=True)
         if root.exists() and not src.exists():
@@ -426,5 +426,5 @@ def restore_site(trash_name: str) -> str:
         if isinstance(e, WebserverError):
             raise
         raise WebserverError(f"restore_site failed: {e}") from e
-    nginx_reload()
+    reload()
     return domain

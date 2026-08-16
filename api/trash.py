@@ -4,11 +4,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import webserver as webserver_ops
 
-from .deps import _log, app, dt_params, dt_response, get_db, require_admin
+from .deps import _log, app, dt_params, dt_response, db_conn, require_admin
 
 class TrashItem(BaseModel):
     name: str
@@ -51,7 +53,7 @@ def restore_site(name: str, user: dict = Depends(require_admin)) -> dict:
         domain = webserver_ops.restore_site(name)
     except webserver_ops.WebserverError as e:
         raise HTTPException(500, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone():
             raise HTTPException(409, f"Site {domain} sudah ada di panel")
         conn.execute(

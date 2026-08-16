@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException
+from fastapi.requests import Request
 
 from core import appstore as store
 
-from .deps import _log, app, get_db, require_auth
+from .deps import _log, app, db_conn, get_db, require_auth
 
 
 @app.get("/api/appstore")

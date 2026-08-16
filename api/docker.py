@@ -12,13 +12,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, File, HTTPException, UploadFile
+from fastapi.requests import Request
+
 from pydantic import BaseModel
 
 from core import docker as docker_ops
 from core import nginx as nginx_ops
 from core import validate
 
-from .deps import _log, app, get_db, require_auth
+from .deps import _log, app, db_conn, require_auth
 
 
 def _docker_err(e: docker_ops.DockerError) -> HTTPException:
@@ -51,7 +53,7 @@ def docker_containers(all: bool = False, user: dict = Depends(require_auth)) -> 
     except docker_ops.DockerError as e:
         raise _docker_err(e) from e
     # gabung domain yang terpasang
-    with get_db() as conn:
+    with db_conn() as conn:
         dm = {r["container"]: {"domain": r["domain"], "port": r["port"]}
               for r in conn.execute("SELECT container, domain, port FROM docker_domains").fetchall()}
     for r in rows:
@@ -77,7 +79,7 @@ def docker_container_action(container_id: str, req: dict, user: dict = Depends(r
         r = docker_ops.container_action(container_id, action)
     except docker_ops.DockerError as e:
         raise _docker_err(e) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, f"docker.container.{action}", f"{container_id[:12]}")
     return r
 
@@ -97,7 +99,7 @@ def docker_pull_image(req: PullImageReq, user: dict = Depends(require_auth)) -> 
         out = docker_ops.pull_image(req.image)
     except docker_ops.DockerError as e:
         raise _docker_err(e) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "docker.image.pull", req.image)
     return {"ok": True, "output": out}
 
@@ -110,7 +112,7 @@ def docker_create_container(req: CreateContainerReq, user: dict = Depends(requir
         )
     except docker_ops.DockerError as e:
         raise _docker_err(e) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "docker.container.create", f"{req.name or req.image}")
     # domain opsional: proxy ke host port pertama (atau port eksplisit)
     if req.domain:
@@ -128,7 +130,7 @@ def _attach_domain(container: str, domain: str, port: int, user: dict) -> None:
         raise HTTPException(400, f"Domain tidak valid: {domain}")
     if not 1 <= port <= 65535:
         raise HTTPException(400, f"Port tidak valid: {port}")
-    with get_db() as conn:
+    with db_conn() as conn:
         if conn.execute("SELECT 1 FROM docker_domains WHERE domain = ?", (domain,)).fetchone():
             raise HTTPException(409, f"Domain {domain} sudah dipakai")
         if conn.execute("SELECT 1 FROM projects WHERE domain = ?", (domain,)).fetchone():
@@ -139,7 +141,7 @@ def _attach_domain(container: str, domain: str, port: int, user: dict) -> None:
         nginx_ops.project_proxy_enable(domain, port)
     except nginx_ops.NginxError as e:
         raise HTTPException(400, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         conn.execute(
             "INSERT INTO docker_domains (container, domain, port, owner_id, created_at) VALUES (?, ?, ?, ?, ?)",
             (container, domain, port,
@@ -159,7 +161,7 @@ def docker_container_domain_add(container_id: str, req: ContainerDomainReq, user
 @app.delete("/api/docker/containers/{container_id}/domain")
 def docker_container_domain_remove(container_id: str, user: dict = Depends(require_auth)) -> dict:
     """Lepas domain container. Hapus vhost proxy."""
-    with get_db() as conn:
+    with db_conn() as conn:
         row = conn.execute("SELECT domain FROM docker_domains WHERE container = ?", (container_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Container tidak punya domain")
@@ -168,7 +170,7 @@ def docker_container_domain_remove(container_id: str, user: dict = Depends(requi
         nginx_ops.project_proxy_disable(domain)
     except nginx_ops.NginxError as e:
         raise HTTPException(400, str(e)) from e
-    with get_db() as conn:
+    with db_conn() as conn:
         conn.execute("DELETE FROM docker_domains WHERE container = ?", (container_id,))
         _log(conn, user, "docker.domain-remove", f"{container_id}: -{domain}")
     return {"ok": True}
@@ -200,6 +202,6 @@ async def docker_import_image(file: UploadFile = File(...), user: dict = Depends
         raise
     except Exception as e:
         raise HTTPException(400, f"Import gagal: {e}") from e
-    with get_db() as conn:
+    with db_conn() as conn:
         _log(conn, user, "docker.image.import", name)
     return {"ok": True, "output": out}
