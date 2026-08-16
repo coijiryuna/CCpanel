@@ -21,6 +21,7 @@ from .deps import _log, app, check_site_access, dt_order, dt_params, dt_response
 
 PROJECT_TYPES = ["static", "php"]
 
+
 class SiteCreate(BaseModel):
     domain: str
     project_type: str = "static"
@@ -38,11 +39,15 @@ class SiteCreate(BaseModel):
     db_name: str = ""
     db_user: str = ""
     db_pass: str = ""
-    site_dir: str = ""           # custom site directory (relative to root_path)
-    running_dir: str = ""        # running directory (e.g., public, public_html, ThinkPHP5, Laravel, Codeigniter)
+    # custom site directory (relative to root_path)
+    site_dir: str = ""
+    # running directory (e.g., public, public_html, ThinkPHP5, Laravel, Codeigniter)
+    running_dir: str = ""
+
 
 class DomainAdd(BaseModel):
     domain: str
+
 
 class SiteResponse(BaseModel):
     id: int
@@ -65,6 +70,7 @@ class SiteResponse(BaseModel):
     created_at: str
     app: dict | None = None
 
+
 def _site_row(row, conn=None) -> SiteResponse:
     extra = []
     if conn is not None:
@@ -81,17 +87,22 @@ def _site_row(row, conn=None) -> SiteResponse:
         vhost_path=row["vhost_path"],
         enabled=bool(row["enabled"]),
         waf_enabled=bool(row["waf_enabled"]),
-        hotlink_enabled=bool(row["hotlink_enabled"]) if "hotlink_enabled" in row.keys() else False,
+        hotlink_enabled=bool(
+            row["hotlink_enabled"]) if "hotlink_enabled" in row.keys() else False,
         webserver=row["webserver"] if "webserver" in row.keys() else "nginx",
-        php_version=row["php_version"] if "php_version" in row.keys() else "static",
-        project_type=row["project_type"] if "project_type" in row.keys() else "static",
+        php_version=row["php_version"] if "php_version" in row.keys(
+        ) else "static",
+        project_type=row["project_type"] if "project_type" in row.keys(
+        ) else "static",
         port=row["port"] if "port" in row.keys() else 0,
-        proxy_enabled=bool(row["proxy_enabled"]) if "proxy_enabled" in row.keys() else False,
+        proxy_enabled=bool(row["proxy_enabled"]
+                           ) if "proxy_enabled" in row.keys() else False,
         extra_domains=extra,
         description=row["description"] if "description" in row.keys() else "",
         category=row["category"] if "category" in row.keys() else "",
         created_at=row["created_at"],
     )
+
 
 @app.delete("/api/sites/{site_id}")
 def delete_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
@@ -111,16 +122,20 @@ def delete_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
             # hapus pool php-fpm + block fastcgi kalau site pakai PHP
             if row["php_version"] != "static":
                 php_ops.remove_pool(row["domain"], row["php_version"])
-                php_ops.remove_php_block(row["domain"], Path(row["vhost_path"]), row["webserver"])
+                php_ops.remove_php_block(row["domain"], Path(
+                    row["vhost_path"]), row["webserver"])
             # hapus app runner kalau ada (systemd unit / docker compose)
-            app = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (site_id,)).fetchone()
+            app = conn.execute(
+                "SELECT * FROM site_apps WHERE site_id = ?", (site_id,)).fetchone()
             if app is not None:
-                apps_ops.remove_app(row["domain"], Path(row["root_path"]), app["app_type"])
+                apps_ops.remove_app(row["domain"], Path(
+                    row["root_path"]), app["app_type"])
         except (webserver_ops.WebserverError, php_ops.PhpError, apps_ops.AppError) as e:
             raise HTTPException(500, str(e)) from e
         conn.execute("DELETE FROM sites WHERE id = ?", (site_id,))
         _log(conn, user, "site.delete", row["domain"])
     return {"ok": True, "trashed": True}
+
 
 @app.post("/api/sites", response_model=SiteResponse)
 def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResponse:
@@ -133,11 +148,13 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
         raise HTTPException(400, "Domain tidak valid")
     ptype = (req.project_type or "static").lower()
     if ptype not in PROJECT_TYPES:
-        raise HTTPException(400, f"Tipe proyek tidak valid. Pilihan: {', '.join(PROJECT_TYPES)}")
+        raise HTTPException(
+            400, f"Tipe proyek tidak valid. Pilihan: {', '.join(PROJECT_TYPES)}")
     port = req.port or 0
     if port and not 1 <= port <= 65535:
         raise HTTPException(400, "Port tidak valid")
-    extra = [d.strip().lower() for d in (req.extra_domains or []) if d and d.strip()]
+    extra = [d.strip().lower()
+             for d in (req.extra_domains or []) if d and d.strip()]
     for d in extra:
         if not validate.valid_domain(d):
             raise HTTPException(400, f"Domain tambahan tidak valid: {d}")
@@ -148,7 +165,8 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
     if ptype != "php":
         php_version = "static"
     if php_version != "static" and php_version not in php_ops.PHP_VERSIONS:
-        raise HTTPException(400, f"PHP version tidak valid. Pilihan: {', '.join(php_ops.PHP_VERSIONS)}")
+        raise HTTPException(
+            400, f"PHP version tidak valid. Pilihan: {', '.join(php_ops.PHP_VERSIONS)}")
     description = (req.description or "").strip()
     category = (req.category or "").strip()
     site_dir = (req.site_dir or "").strip()
@@ -156,14 +174,16 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
     # engine web server: kosong = engine aktif panel, else validasi
     engine = (req.webserver or "").strip().lower() or webserver_ops.ACTIVE
     if engine not in webserver_ops.ENGINES:
-        raise HTTPException(400, f"Web server tidak valid. Pilihan: {', '.join(webserver_ops.ENGINES)}")
+        raise HTTPException(
+            400, f"Web server tidak valid. Pilihan: {', '.join(webserver_ops.ENGINES)}")
 
     with db_conn() as conn:
         if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone():
             raise HTTPException(409, "Domain sudah ada")
         for d in extra:
             if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (d,)).fetchone():
-                raise HTTPException(409, f"Domain tambahan sudah dipakai situs lain: {d}")
+                raise HTTPException(
+                    409, f"Domain tambahan sudah dipakai situs lain: {d}")
         eng = webserver_ops.for_engine(engine)
         try:
             root = eng.create_site(domain, running_dir)
@@ -175,14 +195,16 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
         front_done = False
         if webserver_ops.is_multi() and engine != "nginx":
             try:
-                webserver_ops.front_proxy_enable(domain, webserver_ops.backend_port(engine))
+                webserver_ops.front_proxy_enable(
+                    domain, webserver_ops.backend_port(engine))
                 front_done = True
             except webserver_ops.WebserverError as e:
                 try:
                     eng.remove_vhost(domain)
                 except Exception:
                     pass
-                raise HTTPException(500, f"Gagal pasang front proxy: {e}") from e
+                raise HTTPException(
+                    500, f"Gagal pasang front proxy: {e}") from e
 
         # FTP + DB harus dibuat SEBELUM insert site (butuh site_id utk FK)
         site_id = None
@@ -191,9 +213,11 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
         try:
             if extra:
                 if engine == "nginx":
-                    webserver_ops.nginx_set_server_names(domain, [domain] + extra)
+                    webserver_ops.nginx_set_server_names(
+                        domain, [domain] + extra)
                 else:
-                    eng.nginx_set_server_names(domain, [domain] + extra) if hasattr(eng, "nginx_set_server_names") else None
+                    eng.nginx_set_server_names(
+                        domain, [domain] + extra) if hasattr(eng, "nginx_set_server_names") else None
             # insert site dulu supaya punya site_id
             cur = conn.execute(
                 "INSERT INTO sites (domain, root_path, site_dir, running_dir, vhost_path, enabled, owner_id, webserver, php_version, project_type, port, proxy_enabled, description, category, created_at) "
@@ -206,30 +230,40 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
             )
             site_id = cur.lastrowid
             for d in extra:
-                conn.execute("INSERT INTO site_domains (site_id, domain) VALUES (?, ?)", (site_id, d))
+                conn.execute(
+                    "INSERT INTO site_domains (site_id, domain) VALUES (?, ?)", (site_id, d))
             if php_version != "static":
                 php_ops.create_pool(domain, php_version)
-                php_ops.insert_php_block(domain, php_version, Path(eng.vhost_path(domain)), engine)
+                php_ops.insert_php_block(domain, php_version, Path(
+                    eng.vhost_path(domain)), engine)
             if req.create_ftp:
-                username = (req.ftp_username or "").strip() or domain.split(".")[0]
-                password = (req.ftp_password or "").strip() or secrets.token_urlsafe(12)
+                username = (req.ftp_username or "").strip(
+                ) or domain.split(".")[0]
+                password = (req.ftp_password or "").strip(
+                ) or secrets.token_urlsafe(12)
                 ftp_ops.create_account(username, password, site_id)
                 ftp_created = True
                 conn.execute(
                     "INSERT INTO ftp_accounts (site_id, username, password, created_at) VALUES (?, ?, ?, ?)",
-                    (site_id, username, password, datetime.now(timezone.utc).isoformat()),
+                    (site_id, username, password,
+                     datetime.now(timezone.utc).isoformat()),
                 )
             if req.create_db:
-                db_name = (req.db_name or "").strip().lower() or domain.replace(".", "_")
+                db_name = (req.db_name or "").strip(
+                ).lower() or domain.replace(".", "_")
                 db_user = (req.db_user or "").strip().lower() or db_name
                 if not validate.valid_db_name(db_name):
-                    raise HTTPException(400, "Nama DB tidak valid (a-z, 0-9, _, max 64)")
+                    raise HTTPException(
+                        400, "Nama DB tidak valid (a-z, 0-9, _, max 64)")
                 if not validate.valid_db_name(db_user):
-                    raise HTTPException(400, "Username DB tidak valid (a-z, 0-9, _, max 64)")
-                db_pass = (req.db_pass or "").strip() or secrets.token_urlsafe(12)
+                    raise HTTPException(
+                        400, "Username DB tidak valid (a-z, 0-9, _, max 64)")
+                db_pass = (req.db_pass or "").strip(
+                ) or secrets.token_urlsafe(12)
                 if conn.execute("SELECT 1 FROM dbs WHERE db_name = ?", (db_name,)).fetchone():
                     raise HTTPException(409, "Nama DB sudah dipakai")
-                database_ops.for_engine("mysql").create_db(db_name, db_user, db_pass, "localhost")
+                database_ops.for_engine("mysql").create_db(
+                    db_name, db_user, db_pass, "localhost")
                 conn.execute(
                     "INSERT INTO dbs (site_id, db_name, db_user, db_pass, db_host, db_type, owner_id, created_at) "
                     "VALUES (?, ?, ?, ?, 'localhost', 'mysql', ?, ?)",
@@ -240,30 +274,37 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
                 db_created = (db_name, db_user, db_pass)
             if req.apply_ssl:
                 cert_ops.install_ssl(domain, [domain] + extra)
-            _log(conn, user, "site.create", domain + (f" +{len(extra)} alias" if extra else ""))
+            _log(conn, user, "site.create", domain +
+                 (f" +{len(extra)} alias" if extra else ""))
             conn.commit()
-            row = conn.execute("SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
         except Exception as e:
             # rollback: urut terbalik dari create
             if site_id is not None:
                 conn.execute("DELETE FROM sites WHERE id = ?", (site_id,))
-                conn.execute("DELETE FROM site_domains WHERE site_id = ?", (site_id,))
-                conn.execute("DELETE FROM ftp_accounts WHERE site_id = ?", (site_id,))
+                conn.execute(
+                    "DELETE FROM site_domains WHERE site_id = ?", (site_id,))
+                conn.execute(
+                    "DELETE FROM ftp_accounts WHERE site_id = ?", (site_id,))
                 conn.execute("DELETE FROM dbs WHERE site_id = ?", (site_id,))
             if ftp_created:
                 try:
-                    ftp_ops.delete_account((req.ftp_username or "").strip() or domain.split(".")[0])
+                    ftp_ops.delete_account(
+                        (req.ftp_username or "").strip() or domain.split(".")[0])
                 except Exception:
                     pass
             if db_created:
                 try:
-                    database_ops.for_engine("mysql").drop_db(db_created[0], db_created[1], "localhost")
+                    database_ops.for_engine("mysql").drop_db(
+                        db_created[0], db_created[1], "localhost")
                 except Exception:
                     pass
             if php_version != "static":
                 try:
                     php_ops.remove_pool(domain, php_version)
-                    php_ops.remove_php_block(domain, Path(eng.vhost_path(domain)), engine)
+                    php_ops.remove_php_block(domain, Path(
+                        eng.vhost_path(domain)), engine)
                 except Exception:
                     pass
             try:
@@ -280,9 +321,11 @@ def create_site(req: SiteCreate, user: dict = Depends(require_auth)) -> SiteResp
             raise HTTPException(500, str(e)) from e
         return _site_row(row, conn)
 
+
 @app.get("/api/php/versions")
 def php_versions(user: dict = Depends(require_auth)) -> dict:
     return {"versions": ["static"] + php_ops.PHP_VERSIONS}
+
 
 @app.get("/api/sites", response_model=list[SiteResponse] | dict)
 def list_sites(
@@ -306,25 +349,31 @@ def list_sites(
         args.append(user["id"])
     if search:
         s = f"%{search.strip()}%"
-        search_conds.append("(domain LIKE ? OR description LIKE ? OR category LIKE ?)")
+        search_conds.append(
+            "(domain LIKE ? OR description LIKE ? OR category LIKE ?)")
         args.extend([s, s, s])
     all_conds = conds + search_conds
     where = (" WHERE " + " AND ".join(all_conds)) if all_conds else ""
     with db_conn() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) FROM sites" + (f" WHERE {' AND '.join(conds)}" if conds else ""),
+            "SELECT COUNT(*) FROM sites" +
+            (f" WHERE {' AND '.join(conds)}" if conds else ""),
             args[:len(conds)],
         ).fetchone()[0]
-        filtered = conn.execute("SELECT COUNT(*) FROM sites" + where, args).fetchone()[0]
+        filtered = conn.execute(
+            "SELECT COUNT(*) FROM sites" + where, args).fetchone()[0]
         rows = conn.execute(
-            sql + where + dt_order(["id", "domain", "enabled", "created_at"], order_col, order_dir)
+            sql + where +
+            dt_order(["id", "domain", "enabled", "created_at"],
+                     order_col, order_dir)
             + (" LIMIT ? OFFSET ?" if length else ""),
             args + ([length, start] if length else []),
         ).fetchall()
         out = []
         for r in rows:
             sr = _site_row(r, conn)
-            app = conn.execute("SELECT * FROM site_apps WHERE site_id = ?", (r["id"],)).fetchone()
+            app = conn.execute(
+                "SELECT * FROM site_apps WHERE site_id = ?", (r["id"],)).fetchone()
             if app is not None:
                 sr.app = {
                     "id": app["id"], "app_type": app["app_type"], "port": app["port"],
@@ -334,13 +383,16 @@ def list_sites(
             out.append(sr)
     return dt_response(out, start, length, total, filtered, draw)
 
+
 @app.post("/api/sites/{site_id}/enable")
 def enable_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
     return _set_enabled(site_id, True, user)
 
+
 @app.post("/api/sites/{site_id}/disable")
 def disable_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
     return _set_enabled(site_id, False, user)
+
 
 @app.post("/api/sites/{site_id}/fix-ownership")
 def fix_site_ownership(site_id: int, user: dict = Depends(require_auth)) -> dict:
@@ -348,14 +400,17 @@ def fix_site_ownership(site_id: int, user: dict = Depends(require_auth)) -> dict
 
     Use this to fix LiteSpeed/Apache warnings on existing vhosts that were
     created with root ownership. Requires running as root.
-    """    with db_conn() as conn:
+    """
+    with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         eng = webserver_ops.for_engine(row["webserver"])
         try:
             eng.fix_vhost_ownership(row["domain"])
         except (AttributeError, webserver_ops.WebserverError) as e:
-            raise HTTPException(500, f"Failed to fix ownership: {str(e)}") from e _log(conn, user, "site.fix_ownership", row["domain"])
+            raise HTTPException(500, f"Failed to fix ownership: {str(e)}") from e
+        _log(conn, user, "site.fix_ownership", row["domain"])
     return {"ok": True, "message": "Vhost ownership fixed"}
+
 
 def _set_enabled(site_id: int, enabled: bool, user: dict) -> dict:
     with db_conn() as conn:
@@ -365,9 +420,12 @@ def _set_enabled(site_id: int, enabled: bool, user: dict) -> dict:
             eng.set_enabled(row["domain"], enabled)
         except webserver_ops.WebserverError as e:
             raise HTTPException(500, str(e)) from e
-        conn.execute("UPDATE sites SET enabled = ? WHERE id = ?", (int(enabled), site_id))
-        _log(conn, user, "site.enable" if enabled else "site.disable", row["domain"])
+        conn.execute("UPDATE sites SET enabled = ? WHERE id = ?",
+                     (int(enabled), site_id))
+        _log(conn, user, "site.enable" if enabled else "site.disable",
+             row["domain"])
     return {"ok": True, "enabled": enabled}
+
 
 @app.post("/api/sites/{site_id}/waf")
 def waf_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
@@ -375,18 +433,23 @@ def waf_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
     with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["webserver"] != "nginx":
-            raise HTTPException(400, f"WAF hanya untuk site nginx (site ini: {row['webserver']})")
+            raise HTTPException(
+                400, f"WAF hanya untuk site nginx (site ini: {row['webserver']})")
         vhost = Path(row["vhost_path"])
         enabled = not bool(row["waf_enabled"])
         try:
-            (waf_ops.enable if enabled else waf_ops.disable)(row["domain"], vhost)
+            (waf_ops.enable if enabled else waf_ops.disable)(
+                row["domain"], vhost)
             webserver_ops.for_engine("nginx").nginx_test()
         except webserver_ops.WebserverError as e:
             raise HTTPException(500, str(e)) from e
-        conn.execute("UPDATE sites SET waf_enabled = ? WHERE id = ?", (int(enabled), site_id))
-        _log(conn, user, "waf.enable" if enabled else "waf.disable", row["domain"])
+        conn.execute("UPDATE sites SET waf_enabled = ? WHERE id = ?",
+                     (int(enabled), site_id))
+        _log(conn, user, "waf.enable" if enabled else "waf.disable",
+             row["domain"])
     webserver_ops.for_engine("nginx").nginx_reload()
     return {"ok": True, "waf_enabled": enabled}
+
 
 @app.post("/api/sites/{site_id}/hotlink")
 def hotlink_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
@@ -394,37 +457,47 @@ def hotlink_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
     with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["webserver"] != "nginx":
-            raise HTTPException(400, f"Hotlink hanya untuk site nginx (site ini: {row['webserver']})")
+            raise HTTPException(
+                400, f"Hotlink hanya untuk site nginx (site ini: {row['webserver']})")
         vhost = Path(row["vhost_path"])
         enabled = not bool(row["hotlink_enabled"])
         try:
-            (hotlink_ops.enable if enabled else hotlink_ops.disable)(row["domain"], vhost)
+            (hotlink_ops.enable if enabled else hotlink_ops.disable)(
+                row["domain"], vhost)
             webserver_ops.for_engine("nginx").nginx_test()
         except webserver_ops.WebserverError as e:
             raise HTTPException(500, str(e)) from e
-        conn.execute("UPDATE sites SET hotlink_enabled = ? WHERE id = ?", (int(enabled), site_id))
-        _log(conn, user, "hotlink.enable" if enabled else "hotlink.disable", row["domain"])
+        conn.execute(
+            "UPDATE sites SET hotlink_enabled = ? WHERE id = ?", (int(enabled), site_id))
+        _log(conn, user,
+             "hotlink.enable" if enabled else "hotlink.disable", row["domain"])
     webserver_ops.for_engine("nginx").nginx_reload()
     return {"ok": True, "hotlink_enabled": enabled}
 
+
 class SitePhpUpdate(BaseModel):
     php_version: str
+
 
 @app.put("/api/sites/{site_id}/php")
 def update_site_php(site_id: int, req: SitePhpUpdate, user: dict = Depends(require_auth)) -> dict:
     """Update PHP version for a site. Valid values: static, php8.1, php8.2, php8.3"""
     valid_versions = ["static"] + php_ops.PHP_VERSIONS
     if req.php_version not in valid_versions:
-        raise HTTPException(400, f"PHP version tidak valid. Pilihan: {', '.join(valid_versions)}")
+        raise HTTPException(
+            400, f"PHP version tidak valid. Pilihan: {', '.join(valid_versions)}")
     with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         old_version = row["php_version"]
         try:
-            php_ops.set_php_version(row["domain"], old_version, req.php_version, Path(row["vhost_path"]), row["webserver"])
+            php_ops.set_php_version(row["domain"], old_version, req.php_version, Path(
+                row["vhost_path"]), row["webserver"])
         except php_ops.PhpError as e:
             raise HTTPException(500, str(e)) from e
-        conn.execute("UPDATE sites SET php_version = ? WHERE id = ?", (req.php_version, site_id))
-        _log(conn, user, "site.php-update", f"{row['domain']}: {old_version} -> {req.php_version}")
+        conn.execute("UPDATE sites SET php_version = ? WHERE id = ?",
+                     (req.php_version, site_id))
+        _log(conn, user, "site.php-update",
+             f"{row['domain']}: {old_version} -> {req.php_version}")
     return {"ok": True, "php_version": req.php_version}
 
 
@@ -432,6 +505,7 @@ def update_site_php(site_id: int, req: SitePhpUpdate, user: dict = Depends(requi
 
 class PhpIniUpdate(BaseModel):
     ini: dict[str, str] = {}
+
 
 @app.get("/api/sites/{site_id}/php-config")
 def get_site_php_config(site_id: int, user: dict = Depends(require_auth)) -> dict:
@@ -450,6 +524,7 @@ def get_site_php_config(site_id: int, user: dict = Depends(require_auth)) -> dic
             "extensions": php_ops.list_extensions(version),
         }
 
+
 @app.put("/api/sites/{site_id}/php-config")
 def update_site_php_config(site_id: int, req: PhpIniUpdate, user: dict = Depends(require_auth)) -> dict:
     """Update PHP ini settings for a site's PHP version."""
@@ -465,12 +540,14 @@ def update_site_php_config(site_id: int, req: PhpIniUpdate, user: dict = Depends
                 php_ops.set_ini(version, key, value)
             except php_ops.PhpError as e:
                 raise HTTPException(500, f"{key}: {e}") from e
-        _log(conn, user, "site.php-ini-update", f"{row['domain']}: {list(req.ini.keys())}")
+        _log(conn, user, "site.php-ini-update",
+             f"{row['domain']}: {list(req.ini.keys())}")
     return {"ok": True, "updated": list(req.ini.keys())}
 
 
 class PhpPoolUpdate(BaseModel):
     pool: dict[str, str] = {}
+
 
 @app.put("/api/sites/{site_id}/php-pool")
 def update_site_php_pool(site_id: int, req: PhpPoolUpdate, user: dict = Depends(require_auth)) -> dict:
@@ -487,12 +564,14 @@ def update_site_php_pool(site_id: int, req: PhpPoolUpdate, user: dict = Depends(
                 php_ops.set_pool_option(row["domain"], version, key, value)
             except php_ops.PhpError as e:
                 raise HTTPException(500, f"{key}: {e}") from e
-        _log(conn, user, "site.php-pool-update", f"{row['domain']}: {list(req.pool.keys())}")
+        _log(conn, user, "site.php-pool-update",
+             f"{row['domain']}: {list(req.pool.keys())}")
     return {"ok": True, "updated": list(req.pool.keys())}
 
 
 class PhpExtensionAction(BaseModel):
     extension: str
+
 
 @app.post("/api/sites/{site_id}/php-extensions/enable")
 def enable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
@@ -505,8 +584,10 @@ def enable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict 
             php_ops.enable_extension(row["php_version"], req.extension)
         except php_ops.PhpError as e:
             raise HTTPException(500, str(e)) from e
-        _log(conn, user, "site.php-ext-enable", f"{row['domain']}: {req.extension}")
+        _log(conn, user, "site.php-ext-enable",
+             f"{row['domain']}: {req.extension}")
     return {"ok": True, "extension": req.extension, "enabled": True}
+
 
 @app.post("/api/sites/{site_id}/php-extensions/disable")
 def disable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
@@ -519,8 +600,10 @@ def disable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict
             php_ops.disable_extension(row["php_version"], req.extension)
         except php_ops.PhpError as e:
             raise HTTPException(500, str(e)) from e
-        _log(conn, user, "site.php-ext-disable", f"{row['domain']}: {req.extension}")
+        _log(conn, user, "site.php-ext-disable",
+             f"{row['domain']}: {req.extension}")
     return {"ok": True, "extension": req.extension, "enabled": False}
+
 
 @app.post("/api/sites/{site_id}/php-extensions/install")
 def install_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict = Depends(require_auth)) -> dict:
@@ -532,9 +615,12 @@ def install_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict
             raise HTTPException(400, "Site tidak menggunakan PHP-FPM")
         key = f"php-ext:{row['php_version']}:{req.extension}:{int(_t.time())}"
         from core import tasks as tasks_ops
-        tasks_ops.start(key, lambda: php_ops.install_extension_task(row["php_version"], req.extension, key))
-        _log(conn, user, "site.php-ext-install", f"{row['domain']}: {req.extension}")
+        tasks_ops.start(key, lambda: php_ops.install_extension_task(
+            row["php_version"], req.extension, key))
+        _log(conn, user, "site.php-ext-install",
+             f"{row['domain']}: {req.extension}")
     return {"ok": True, "extension": req.extension, "key": key}
+
 
 @app.get("/api/sites/php-extensions/tasks/{key}")
 def php_extension_task_status(key: str, _=Depends(require_auth)):
@@ -548,8 +634,11 @@ def php_extension_task_status(key: str, _=Depends(require_auth)):
 def _add_domain_db(conn, site_id: int, domain: str) -> None:
     """Insert row site_domains. Raise HTTPException kalau duplikat."""
     if conn.execute("SELECT 1 FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain)).fetchone():
-        raise HTTPException(409, f"Domain {domain} sudah terpasang di site ini")
-    conn.execute("INSERT INTO site_domains (site_id, domain) VALUES (?, ?)", (site_id, domain))
+        raise HTTPException(
+            409, f"Domain {domain} sudah terpasang di site ini")
+    conn.execute(
+        "INSERT INTO site_domains (site_id, domain) VALUES (?, ?)", (site_id, domain))
+
 
 @app.post("/api/sites/{site_id}/domains")
 def add_domain(site_id: int, req: DomainAdd, user: dict = Depends(require_auth)) -> dict:
@@ -563,19 +652,24 @@ def add_domain(site_id: int, req: DomainAdd, user: dict = Depends(require_auth))
         if conn.execute("SELECT 1 FROM sites WHERE domain = ?", (domain,)).fetchone():
             raise HTTPException(409, f"Domain {domain} sudah jadi site utama")
         if conn.execute("SELECT 1 FROM site_domains WHERE domain = ?", (domain,)).fetchone():
-            raise HTTPException(409, f"Domain {domain} sudah dipakai site lain")
+            raise HTTPException(
+                409, f"Domain {domain} sudah dipakai site lain")
         if row["webserver"] != "nginx":
-            raise HTTPException(400, f"Alias domain hanya untuk site nginx (site ini: {row['webserver']})")
+            raise HTTPException(
+                400, f"Alias domain hanya untuk site nginx (site ini: {row['webserver']})")
         _add_domain_db(conn, site_id, domain)
         names = [d for d in conn.execute(
             "SELECT domain FROM site_domains WHERE site_id = ?", (site_id,)).fetchall()]
         try:
-            webserver_ops.nginx_set_server_names(row["domain"], [row["domain"], *(r["domain"] for r in names)])
+            webserver_ops.nginx_set_server_names(
+                row["domain"], [row["domain"], *(r["domain"] for r in names)])
         except webserver_ops.WebserverError as e:
-            conn.execute("DELETE FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain))
+            conn.execute(
+                "DELETE FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain))
             raise HTTPException(500, str(e)) from e
         _log(conn, user, "site.domain-add", f"{row['domain']}: +{domain}")
     return {"ok": True, "domain": domain}
+
 
 @app.delete("/api/sites/{site_id}/domains/{domain}")
 def remove_domain(site_id: int, domain: str, user: dict = Depends(require_auth)) -> dict:
@@ -584,14 +678,17 @@ def remove_domain(site_id: int, domain: str, user: dict = Depends(require_auth))
     with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["domain"] == domain:
-            raise HTTPException(400, "Domain utama tidak bisa dihapus lewat sini")
+            raise HTTPException(
+                400, "Domain utama tidak bisa dihapus lewat sini")
         if not conn.execute("SELECT 1 FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain)).fetchone():
             raise HTTPException(404, f"Domain {domain} tidak terpasang")
-        conn.execute("DELETE FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain))
+        conn.execute(
+            "DELETE FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain))
         names = [r["domain"] for r in conn.execute(
             "SELECT domain FROM site_domains WHERE site_id = ?", (site_id,)).fetchall()]
         try:
-            webserver_ops.nginx_set_server_names(row["domain"], [row["domain"], *names])
+            webserver_ops.nginx_set_server_names(
+                row["domain"], [row["domain"], *names])
         except webserver_ops.WebserverError as e:
             _add_domain_db(conn, site_id, domain)  # rollback row
             raise HTTPException(500, str(e)) from e
@@ -600,8 +697,10 @@ def remove_domain(site_id: int, domain: str, user: dict = Depends(require_auth))
 
 # ------------------------------------------------------- proxy penuh (port)
 
+
 class ProxyToggle(BaseModel):
     enabled: bool
+
 
 @app.post("/api/sites/{site_id}/proxy")
 def toggle_proxy(site_id: int, req: ProxyToggle, user: dict = Depends(require_auth)) -> dict:
@@ -610,9 +709,11 @@ def toggle_proxy(site_id: int, req: ProxyToggle, user: dict = Depends(require_au
     with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["webserver"] != "nginx":
-            raise HTTPException(400, f"Proxy hanya untuk site nginx (site ini: {row['webserver']})")
+            raise HTTPException(
+                400, f"Proxy hanya untuk site nginx (site ini: {row['webserver']})")
         if req.enabled and not row["port"]:
-            raise HTTPException(400, "Set port site dulu sebelum proxy ON (endpoint PUT /api/sites/{id}/port)")
+            raise HTTPException(
+                400, "Set port site dulu sebelum proxy ON (endpoint PUT /api/sites/{id}/port)")
         try:
             if req.enabled:
                 webserver_ops.nginx_proxy_enable(row["domain"], row["port"])
@@ -620,12 +721,16 @@ def toggle_proxy(site_id: int, req: ProxyToggle, user: dict = Depends(require_au
                 webserver_ops.nginx_proxy_disable(row["domain"])
         except webserver_ops.WebserverError as e:
             raise HTTPException(500, str(e)) from e
-        conn.execute("UPDATE sites SET proxy_enabled = ? WHERE id = ?", (int(req.enabled), site_id))
-        _log(conn, user, "site.proxy" + ("-on" if req.enabled else "-off"), row["domain"])
+        conn.execute("UPDATE sites SET proxy_enabled = ? WHERE id = ?",
+                     (int(req.enabled), site_id))
+        _log(conn, user, "site.proxy" +
+             ("-on" if req.enabled else "-off"), row["domain"])
     return {"ok": True, "proxy_enabled": req.enabled}
+
 
 class PortUpdate(BaseModel):
     port: int
+
 
 @app.put("/api/sites/{site_id}/port")
 def update_site_port(site_id: int, req: PortUpdate, user: dict = Depends(require_auth)) -> dict:
@@ -636,18 +741,20 @@ def update_site_port(site_id: int, req: PortUpdate, user: dict = Depends(require
     with db_conn() as conn:
         row = check_site_access(conn, site_id, user)
         if row["webserver"] != "nginx":
-            raise HTTPException(400, f"Proxy hanya untuk site nginx (site ini: {row['webserver']})")
+            raise HTTPException(
+                400, f"Proxy hanya untuk site nginx (site ini: {row['webserver']})")
         if row["proxy_enabled"]:
             try:
                 webserver_ops.nginx_proxy_enable(row["domain"], req.port)
             except webserver_ops.WebserverError as e:
                 raise HTTPException(500, str(e)) from e
-        conn.execute("UPDATE sites SET port = ? WHERE id = ?", (req.port, site_id))
-        _log(conn, user, "site.port", f"{row['domain']}: {row['port']} -> {req.port}")
+        conn.execute("UPDATE sites SET port = ? WHERE id = ?",
+                     (req.port, site_id))
+        _log(conn, user, "site.port",
+             f"{row['domain']}: {row['port']} -> {req.port}")
     return {"ok": True, "port": req.port}
 
 
 @app.get("/api/test-trigger-error")
 def trigger_error():
     raise ValueError("This is a simulated server error")
-
