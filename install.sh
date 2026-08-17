@@ -196,11 +196,40 @@ fi
 mkdir -p /usr/local/lsws/conf/vhosts
 mkdir -p /www/server/panel/vhost/litespeed/extension
 
+cleanup_ols_example() {
+  local conf_dir="/usr/local/lsws/conf"
+  local httpd_conf="$conf_dir/httpd_config.conf"
+  local example_dir="$conf_dir/vhosts/Example"
+  local backups=(
+    "$conf_dir/httpd_config.conf0"
+    "$conf_dir/httpd_config.conf0,v"
+    "$conf_dir/httpd_config.conf.txt"
+  )
+
+  rm -rf "$example_dir" 2>/dev/null || true
+
+  if [ -f "$httpd_conf" ]; then
+    sed -i '/^[[:space:]]*virtualHost Example{/,/^[[:space:]]*}[[:space:]]*$/d' "$httpd_conf"
+    sed -i '/^[[:space:]]*map[[:space:]]\+Example[[:space:]]\+\*/d' "$httpd_conf"
+  fi
+
+  for b in "${backups[@]}"; do
+    rm -f "$b" 2>/dev/null || true
+  done
+}
+
+cleanup_ols_example
+
 # Configure OpenLiteSpeed to listen on port 8188 (not default 8088)
 # This matches the multi-web-server architecture in PLAN.md
 if [ -f /usr/local/lsws/conf/httpd_config.conf ]; then
-  sed -i 's/address\s*8088/address 8188/' /usr/local/lsws/conf/httpd_config.conf
-  sed -i 's/address\s*8088/address 8188/' /usr/local/lsws/conf/httpd_config.conf 2>/dev/null || true
+  sed -i 's/8088/8188/g' /usr/local/lsws/conf/httpd_config.conf
+  sed -i 's/8088/8188/g' /usr/local/lsws/conf/httpd_config.conf 2>/dev/null || true
+fi
+
+# Hard reset OLS port in case repo config still carries 8088
+if [ -f /usr/local/lsws/conf/httpd_config.conf ]; then
+  grep -RIl "8088" /usr/local/lsws/conf | xargs -r sed -i 's/8088/8188/g'
 fi
 
 # Enable and start Apache and OpenLiteSpeed services

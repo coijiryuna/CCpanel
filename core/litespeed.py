@@ -117,23 +117,24 @@ def root_path(domain: str) -> Path:
 
 
 def _get_web_user_uid_gid() -> tuple[int, int]:
-    """Get uid/gid for web user. LiteSpeed wants non-root uid/gid."""
-    for user_name in ("www-data", "www", "nobody"):
+    """Get uid/gid for web user. LiteSpeed requires uid >= 11, gid >= 10."""
+    for user_name in ("www-data", "nobody", "www"):
         try:
             pw = pwd.getpwnam(user_name)
             gr = grp.getgrgid(pw.pw_gid)
-            if pw.pw_uid > 0 and gr.gr_gid > 0:
+            if pw.pw_uid >= 11 and gr.gr_gid >= 10:
                 return pw.pw_uid, gr.gr_gid
         except KeyError:
             continue
     for pw in pwd.getpwall():
         try:
             gr = grp.getgrgid(pw.pw_gid)
-            if pw.pw_uid > 0 and gr.gr_gid > 0:
+            if pw.pw_uid >= 11 and gr.gr_gid >= 10:
                 return pw.pw_uid, gr.gr_gid
         except KeyError:
             continue
-    raise WebserverError("Cannot find suitable web user for directory ownership (non-root uid/gid required)")
+    raise WebserverError(
+        "Cannot find suitable web user for directory ownership (uid >= 11, gid >= 10 required)")
 
 
 def test() -> None:
@@ -261,21 +262,16 @@ def create_site(domain: str, running_dir: str = "") -> Path:
     try:
         root.mkdir(parents=True, exist_ok=False)
         # Set proper ownership: LiteSpeed requires uid >= 11 and gid >= 10
-        try:
-            uid, gid = _get_web_user_uid_gid()
-            os.chown(root, uid, gid)
-            # Also fix parent directories if needed (recursively up to WWW_ROOT)
-            parent = root.parent
-            while parent != WWW_ROOT.parent and parent.exists():
-                try:
-                    os.chown(parent, uid, gid)
-                except (PermissionError, OSError):
-                    pass
-                parent = parent.parent
-        except (PermissionError, OSError):
-            # In test/dev environment may not have chown permission — continue anyway
-            # In production, this should succeed if running as root
-            pass
+        uid, gid = _get_web_user_uid_gid()
+        os.chown(root, uid, gid)
+        # Also fix parent directories if needed (recursively up to WWW_ROOT)
+        parent = root.parent
+        while parent != WWW_ROOT.parent and parent.exists():
+            try:
+                os.chown(parent, uid, gid)
+            except (PermissionError, OSError):
+                pass
+            parent = parent.parent
     except FileExistsError:
         raise WebserverError(f"Folder root sudah ada: {root}") from None
     try:

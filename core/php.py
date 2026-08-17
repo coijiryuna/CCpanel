@@ -26,7 +26,7 @@ def _php_location_block(domain: str, php_version: str) -> str:
     ver = php_version[3:]  # "8.1"
     return f"""    {PHP_VHOST_BEGIN}
     location ~ \\.php$ {{
-        include fastcgi_params;
+        include /etc/nginx/fastcgi_params;
         fastcgi_pass unix:/run/php/php{ver}-fpm-{domain}.sock;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
     }}
