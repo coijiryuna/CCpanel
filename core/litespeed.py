@@ -118,7 +118,7 @@ def root_path(domain: str) -> Path:
 
 def _get_web_user_uid_gid() -> tuple[int, int]:
     """Get uid/gid for web user. LiteSpeed requires uid >= 11, gid >= 10."""
-    for user_name in ("www-data", "nobody", "www"):
+    for user_name in ("www", "nobody", "www-data"):
         try:
             pw = pwd.getpwnam(user_name)
             gr = grp.getgrgid(pw.pw_gid)
@@ -143,10 +143,40 @@ def test() -> None:
         raise WebserverError(res.stderr.strip() or res.stdout.strip() or "lshttpd -t failed")
 
 
-def reload() -> None:
-    res = _run([LSWS_BIN, "restart"])
+def _lsws_running() -> bool:
+    return any((
+        _run(["bash", "-lc", "pgrep -x lshttpd >/dev/null || pgrep -x openlitespeed >/dev/null"]).returncode == 0,
+        _run(["bash", "-lc", "ss -ltnp '( sport = :8188 or sport = :8088 )' | grep -q lshttpd"]).returncode == 0,
+    ))
+
+
+def stop() -> None:
+    _run(["systemctl", "stop", "lsws"])
+    _run([LSWS_BIN, "-k", "stop"])
+    _run(["pkill", "-TERM", "-x", "lshttpd"])
+    _run(["pkill", "-TERM", "-x", "openlitespeed"])
+    _run(["pkill", "-KILL", "-x", "lshttpd"])
+    _run(["pkill", "-KILL", "-x", "openlitespeed"])
+    if _lsws_running():
+        raise WebserverError("lsws still running after stop")
+
+
+def start() -> None:
+    res = _run(["systemctl", "start", "lsws"])
     if res.returncode != 0:
-        raise WebserverError(res.stderr.strip() or "lshttpd restart failed")
+        res = _run([LSWS_BIN, "-k", "start"])
+    if res.returncode != 0:
+        raise WebserverError(
+            res.stderr.strip() or res.stdout.strip() or "lshttpd start failed")
+
+
+def reload() -> None:
+    res = _run(["systemctl", "restart", "lsws"])
+    if res.returncode != 0:
+        res = _run([LSWS_BIN, "-k", "restart"])
+    if res.returncode != 0:
+        raise WebserverError(
+            res.stderr.strip() or res.stdout.strip() or "lshttpd restart failed")
 
 
 def _write_vhost(domain: str, root: Path, running_dir: str = "") -> None:
@@ -259,6 +289,11 @@ def create_site(domain: str, running_dir: str = "") -> Path:
     root = root_path(domain)
     if root.exists():
         raise WebserverError(f"Folder root sudah ada: {root}")
+    was_running = True
+    try:
+        stop()
+    except WebserverError:
+        was_running = False
     try:
         root.mkdir(parents=True, exist_ok=False)
         # Set proper ownership: LiteSpeed requires uid >= 11 and gid >= 10
@@ -281,10 +316,18 @@ def create_site(domain: str, running_dir: str = "") -> Path:
     except Exception as e:
         vhost_path(domain).unlink(missing_ok=True)
         shutil.rmtree(root, ignore_errors=True)
+        if was_running:
+            try:
+                start()
+            except WebserverError:
+                pass
         if isinstance(e, WebserverError):
             raise
         raise WebserverError(f"create_site failed: {e}") from e
-    reload()
+    if was_running:
+        start()
+    else:
+        reload()
     return root
 
 
@@ -294,13 +337,26 @@ def activate_site(domain: str, running_dir: str = "") -> None:
         raise WebserverError(f"Folder root tidak ada: {root}")
     if vhost_path(domain).exists():
         raise WebserverError(f"vhost {vhost_path(domain)} sudah ada")
+    was_running = True
+    try:
+        stop()
+    except WebserverError:
+        was_running = False
     _write_vhost(domain, root, running_dir)
     try:
         test()
     except WebserverError:
         vhost_path(domain).unlink(missing_ok=True)
+        if was_running:
+            try:
+                start()
+            except WebserverError:
+                pass
         raise
-    reload()
+    if was_running:
+        start()
+    else:
+        reload()
 
 
 def fix_vhost_ownership(domain: str) -> None:

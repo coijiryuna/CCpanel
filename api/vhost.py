@@ -64,6 +64,9 @@ def get_site_config(site_id: int, user: dict = Depends(require_auth)) -> dict:
         # Backend vhost (engine-specific)
         vh = Path(row["vhost_path"])
         if not vh.exists():
+            # vhost hilang — coba regen dari engine di DB
+            vh = webserver_ops.for_engine(engine).vhost_path(domain)
+        if not vh.exists():
             raise HTTPException(500, f"vhost {vh} tidak ada")
         backend_content = vh.read_text()
         backend_feats = _parse_backend_features(backend_content, engine)
@@ -271,6 +274,9 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
         raise HTTPException(400, f"Web server tidak valid. Pilihan: {', '.join(webserver_ops.ENGINES)}")
 
     with db_conn() as conn:
+        row = check_site_access(conn, site_id, user)
+        domain = row["domain"]
+        old_engine = row["webserver"]
         if engine == old_engine:
             return {"ok": True, "engine": engine}
 
@@ -292,7 +298,7 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
             #    overwrite + preserve direktif SSL (site tetap HTTPS).
             if not (multi and old_engine == "nginx"):
                 old_eng.remove_vhost(domain)
-            # 2. buat vhost baru pakai folder root yang sama.
+            # 2. buat vhost baru pakai folder yang sama.
             #    multi mode: nginx front = proxy/static vhost di 80, backend
             #    engine = vhost di port backend. Switch engine backend punya
             #    nginx front yang harus dibalik/repasang.
@@ -316,9 +322,10 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
                 php_ops.insert_php_block(domain, php_version, new_vhost, engine)
             # 4. migrasi fitur include (rewrite/xss/accesslog) — nginx-only
             siteconfig_ops.migrate_vhost(domain, old_content, new_vhost, engine)
-            # 5. update DB
+            # 5. update DB - commit segera agar tidak rollback kalau _log() gagal
             conn.execute("UPDATE sites SET webserver = ?, vhost_path = ? WHERE id = ?",
                          (engine, str(new_vhost), site_id))
+            conn.commit()
         except (webserver_ops.WebserverError, php_ops.PhpError) as e:
             # rollback: restore vhost lama
             try:
@@ -334,5 +341,10 @@ async def switch_engine(site_id: int, req: Request, user: dict = Depends(require
                 except Exception:
                     pass
             raise HTTPException(500, f"Gagal pindah engine: {e}") from e
-        _log(conn, user, "site.engine", f"{domain}: {old_engine} -> {engine}")
+        # Log audit setelah commit - kalau gagal jangan gagalkan operasi utama
+        try:
+            _log(conn, user, "site.engine",
+                 f"{domain}: {old_engine} -> {engine}")
+        except Exception:
+            pass
     return {"ok": True, "engine": engine}

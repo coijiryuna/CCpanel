@@ -14,7 +14,7 @@ import traceback
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from fastapi.requests import Request
+from starlette.requests import Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 

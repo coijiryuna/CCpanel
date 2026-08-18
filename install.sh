@@ -206,11 +206,13 @@ cleanup_ols_example() {
     "$conf_dir/httpd_config.conf.txt"
   )
 
+  systemctl stop lsws 2>/dev/null || true
   rm -rf "$example_dir" 2>/dev/null || true
 
   if [ -f "$httpd_conf" ]; then
     sed -i '/^[[:space:]]*virtualHost Example{/,/^[[:space:]]*}[[:space:]]*$/d' "$httpd_conf"
     sed -i '/^[[:space:]]*map[[:space:]]\+Example[[:space:]]\+\*/d' "$httpd_conf"
+    sed -i 's/8088/8188/g' "$httpd_conf"
   fi
 
   for b in "${backups[@]}"; do
@@ -220,16 +222,11 @@ cleanup_ols_example() {
 
 cleanup_ols_example
 
-# Configure OpenLiteSpeed to listen on port 8188 (not default 8088)
-# This matches the multi-web-server architecture in PLAN.md
-if [ -f /usr/local/lsws/conf/httpd_config.conf ]; then
-  sed -i 's/8088/8188/g' /usr/local/lsws/conf/httpd_config.conf
-  sed -i 's/8088/8188/g' /usr/local/lsws/conf/httpd_config.conf 2>/dev/null || true
-fi
-
 # Hard reset OLS port in case repo config still carries 8088
-if [ -f /usr/local/lsws/conf/httpd_config.conf ]; then
-  grep -RIl "8088" /usr/local/lsws/conf | xargs -r sed -i 's/8088/8188/g'
+if [ -d /usr/local/lsws/conf ]; then
+  if grep -RIl "8088" /usr/local/lsws/conf 2>/dev/null; then
+    grep -RIl "8088" /usr/local/lsws/conf 2>/dev/null | xargs -r sed -i 's/8088/8188/g'
+  fi
 fi
 
 # Enable and start Apache and OpenLiteSpeed services

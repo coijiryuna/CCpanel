@@ -115,19 +115,19 @@ CATALOG: list[dict] = [
     {"id": "node18", "name": "Node.js 18", "category": "node", "kind": "node", "desc": "Node.js v18 LTS via nvm",
      "install": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm install 18"],
      "uninstall": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm uninstall 18"],
-     "detect": {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v18")}},
+     "detect": {"type": "any", "items": [{"type": "which", "bin": ["node"]}, {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v18")}]}},
     {"id": "node20", "name": "Node.js 20", "category": "node", "kind": "node", "desc": "Node.js v20 LTS via nvm",
      "install": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm install 20"],
      "uninstall": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm uninstall 20"],
-     "detect": {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v20")}},
+     "detect": {"type": "any", "items": [{"type": "which", "bin": ["node"]}, {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v20")}]}},
     {"id": "node22", "name": "Node.js 22", "category": "node", "kind": "node", "desc": "Node.js v22 LTS via nvm",
      "install": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm install 22"],
      "uninstall": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm uninstall 22"],
-     "detect": {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v22")}},
+     "detect": {"type": "any", "items": [{"type": "which", "bin": ["node"]}, {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v22")}]}},
     {"id": "node24", "name": "Node.js 24", "category": "node", "kind": "node", "desc": "Node.js v24 via nvm",
      "install": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm install 24"],
      "uninstall": ["bash", "-lc", f"source {NVM_DIR}/nvm.sh && nvm uninstall 24"],
-     "detect": {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v24")}},
+     "detect": {"type": "any", "items": [{"type": "which", "bin": ["node"]}, {"type": "dir", "path": str(NVM_DIR / "versions" / "node" / "v24")}]}},
     # ---- Go SDK ----
     {"id": "go1.22", "name": "Go 1.22", "category": "go", "kind": "go", "desc": "Go SDK 1.22",
      "install": ["bash", "-lc", f"mkdir -p {GO_ROOT} && curl -sSL https://go.dev/dl/go1.22.linux-amd64.tar.gz | tar -C {GO_ROOT} -xzf - && mv {GO_ROOT}/go {GO_ROOT}/go1.22"],
@@ -218,7 +218,7 @@ def _php_install_cmd(version: str) -> list[str]:
 def _node_install_cmd(version: str) -> list[str]:
     return ["bash", "-lc", (
         "set -e; "
-        "export NVM_DIR=\"${NVM_DIR:-$HOME/.nvm}\"; "
+        "export NVM_DIR=\"${{NVM_DIR:-$HOME/.nvm}}\"; "
         "mkdir -p \"$NVM_DIR\"; "
         "if [ ! -s \"$NVM_DIR/nvm.sh\" ]; then "
         "  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash; "
@@ -268,6 +268,10 @@ def _detect(spec) -> bool:
         return any(_which(b) for b in spec.get("bin", []))
     if t == "dir":
         return Path(os.path.expanduser(spec.get("path", ""))).is_dir()
+    if t == "any":
+        return any(_detect(item) for item in spec.get("items", []))
+    if t == "all":
+        return all(_detect(item) for item in spec.get("items", []))
     return False
 
 
