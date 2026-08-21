@@ -241,6 +241,7 @@ def mysql_set_variable(req: GlobalVarRequest, user: dict = Depends(require_admin
         raise HTTPException(400, str(e)) from e
     with db_conn() as conn:
         _log(conn, user, "mysql.set-global", f"{req.variable} = {req.value}")
+        conn.commit()
     return {"ok": True, "variable": req.variable, "value": req.value}
 
 
@@ -253,6 +254,7 @@ def mysql_optimize(req: PresetRequest, user: dict = Depends(require_admin)) -> d
         raise HTTPException(400, str(e)) from e
     with db_conn() as conn:
         _log(conn, user, "mysql.optimize", req.name)
+        conn.commit()
     return r
 
 
@@ -271,6 +273,7 @@ def mysql_config_save(req: ConfigRequest, user: dict = Depends(require_admin)) -
         raise HTTPException(400, str(e)) from e
     with db_conn() as conn:
         _log(conn, user, "mysql.config", mysql_admin_ops.CONF_PATH.name)
+        conn.commit()
     return {"ok": True, "path": str(mysql_admin_ops.CONF_PATH)}
 
 
@@ -306,6 +309,7 @@ def pg_set_variable(req: GlobalVarRequest, user: dict = Depends(require_admin)) 
         raise HTTPException(400, str(e)) from e
     with db_conn() as conn:
         _log(conn, user, "pg.set-global", f"{req.variable} = {req.value}")
+        conn.commit()
     return {"ok": True, "variable": req.variable, "value": req.value}
 
 
@@ -318,6 +322,7 @@ def pg_optimize(req: PresetRequest, user: dict = Depends(require_admin)) -> dict
         raise HTTPException(400, str(e)) from e
     with db_conn() as conn:
         _log(conn, user, "pg.optimize", req.name)
+        conn.commit()
     return r
 
 
@@ -389,6 +394,7 @@ def mongo_set_parameter(req: GlobalVarRequest, user: dict = Depends(require_admi
         raise HTTPException(400, str(e)) from e
     with db_conn() as conn:
         _log(conn, user, "mongo.set-parameter", f"{req.variable} = {req.value}")
+        conn.commit()
     return {"ok": True, "variable": req.variable, "value": req.value}
 
 @app.post("/api/dbs/root-password")
@@ -418,6 +424,7 @@ def set_root_password(
         raise HTTPException(400, f"Engine {engine} tidak punya root password")
     with db_conn() as conn:
         _log(conn, user, "db.root-password", detail)
+        conn.commit()
     return {"ok": True}
 
 

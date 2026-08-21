@@ -82,6 +82,7 @@ def docker_container_action(container_id: str, req: dict, user: dict = Depends(r
         raise _docker_err(e) from e
     with db_conn() as conn:
         _log(conn, user, f"docker.container.{action}", f"{container_id[:12]}")
+        conn.commit()
     return r
 
 
@@ -102,6 +103,7 @@ def docker_pull_image(req: PullImageReq, user: dict = Depends(require_auth)) -> 
         raise _docker_err(e) from e
     with db_conn() as conn:
         _log(conn, user, "docker.image.pull", req.image)
+        conn.commit()
     return {"ok": True, "output": out}
 
 
@@ -159,7 +161,6 @@ def _attach_domain(container: str, domain: str, port: int, user: dict) -> None:
 def docker_container_domain_add(container_id: str, req: ContainerDomainReq, user: dict = Depends(require_auth)) -> dict:
     """Pasang domain ke container yang sudah ada. Proxy ke host port."""
     _attach_domain(container_id, req.domain, req.port, user)
-    conn.commit()
     return {"ok": True}
 
 
@@ -215,4 +216,5 @@ async def docker_import_image(file: UploadFile = File(...), user: dict = Depends
         raise HTTPException(400, f"Import gagal: {e}") from e
     with db_conn() as conn:
         _log(conn, user, "docker.image.import", name)
+        conn.commit()
     return {"ok": True, "output": out}

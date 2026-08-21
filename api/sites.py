@@ -134,6 +134,7 @@ def delete_site(site_id: int, user: dict = Depends(require_auth)) -> dict:
             raise HTTPException(500, str(e)) from e
         conn.execute("DELETE FROM sites WHERE id = ?", (site_id,))
         _log(conn, user, "site.delete", row["domain"])
+        conn.commit()
     return {"ok": True, "trashed": True}
 
 
@@ -409,6 +410,7 @@ def fix_site_ownership(site_id: int, user: dict = Depends(require_auth)) -> dict
         except (AttributeError, webserver_ops.WebserverError) as e:
             raise HTTPException(500, f"Failed to fix ownership: {str(e)}") from e
         _log(conn, user, "site.fix_ownership", row["domain"])
+        conn.commit()
     return {"ok": True, "message": "Vhost ownership fixed"}
 
 
@@ -424,6 +426,7 @@ def _set_enabled(site_id: int, enabled: bool, user: dict) -> dict:
                      (int(enabled), site_id))
         _log(conn, user, "site.enable" if enabled else "site.disable",
              row["domain"])
+        conn.commit()
     return {"ok": True, "enabled": enabled}
 
 
@@ -447,6 +450,7 @@ def waf_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
                      (int(enabled), site_id))
         _log(conn, user, "waf.enable" if enabled else "waf.disable",
              row["domain"])
+        conn.commit()
     webserver_ops.for_engine("nginx").nginx_reload()
     return {"ok": True, "waf_enabled": enabled}
 
@@ -471,6 +475,7 @@ def hotlink_toggle(site_id: int, user: dict = Depends(require_auth)) -> dict:
             "UPDATE sites SET hotlink_enabled = ? WHERE id = ?", (int(enabled), site_id))
         _log(conn, user,
              "hotlink.enable" if enabled else "hotlink.disable", row["domain"])
+        conn.commit()
     webserver_ops.for_engine("nginx").nginx_reload()
     return {"ok": True, "hotlink_enabled": enabled}
 
@@ -498,6 +503,7 @@ def update_site_php(site_id: int, req: SitePhpUpdate, user: dict = Depends(requi
                      (req.php_version, site_id))
         _log(conn, user, "site.php-update",
              f"{row['domain']}: {old_version} -> {req.php_version}")
+        conn.commit()
     return {"ok": True, "php_version": req.php_version}
 
 
@@ -542,6 +548,7 @@ def update_site_php_config(site_id: int, req: PhpIniUpdate, user: dict = Depends
                 raise HTTPException(500, f"{key}: {e}") from e
         _log(conn, user, "site.php-ini-update",
              f"{row['domain']}: {list(req.ini.keys())}")
+        conn.commit()
     return {"ok": True, "updated": list(req.ini.keys())}
 
 
@@ -566,6 +573,7 @@ def update_site_php_pool(site_id: int, req: PhpPoolUpdate, user: dict = Depends(
                 raise HTTPException(500, f"{key}: {e}") from e
         _log(conn, user, "site.php-pool-update",
              f"{row['domain']}: {list(req.pool.keys())}")
+        conn.commit()
     return {"ok": True, "updated": list(req.pool.keys())}
 
 
@@ -586,6 +594,7 @@ def enable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict 
             raise HTTPException(500, str(e)) from e
         _log(conn, user, "site.php-ext-enable",
              f"{row['domain']}: {req.extension}")
+        conn.commit()
     return {"ok": True, "extension": req.extension, "enabled": True}
 
 
@@ -602,6 +611,7 @@ def disable_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict
             raise HTTPException(500, str(e)) from e
         _log(conn, user, "site.php-ext-disable",
              f"{row['domain']}: {req.extension}")
+        conn.commit()
     return {"ok": True, "extension": req.extension, "enabled": False}
 
 
@@ -619,6 +629,7 @@ def install_site_php_extension(site_id: int, req: PhpExtensionAction, user: dict
             row["php_version"], req.extension, key))
         _log(conn, user, "site.php-ext-install",
              f"{row['domain']}: {req.extension}")
+        conn.commit()
     return {"ok": True, "extension": req.extension, "key": key}
 
 
@@ -668,6 +679,7 @@ def add_domain(site_id: int, req: DomainAdd, user: dict = Depends(require_auth))
                 "DELETE FROM site_domains WHERE site_id = ? AND domain = ?", (site_id, domain))
             raise HTTPException(500, str(e)) from e
         _log(conn, user, "site.domain-add", f"{row['domain']}: +{domain}")
+        conn.commit()
     return {"ok": True, "domain": domain}
 
 
@@ -693,6 +705,7 @@ def remove_domain(site_id: int, domain: str, user: dict = Depends(require_auth))
             _add_domain_db(conn, site_id, domain)  # rollback row
             raise HTTPException(500, str(e)) from e
         _log(conn, user, "site.domain-remove", f"{row['domain']}: -{domain}")
+        conn.commit()
     return {"ok": True}
 
 # ------------------------------------------------------- proxy penuh (port)
@@ -725,6 +738,7 @@ def toggle_proxy(site_id: int, req: ProxyToggle, user: dict = Depends(require_au
                      (int(req.enabled), site_id))
         _log(conn, user, "site.proxy" +
              ("-on" if req.enabled else "-off"), row["domain"])
+        conn.commit()
     return {"ok": True, "proxy_enabled": req.enabled}
 
 
@@ -752,6 +766,7 @@ def update_site_port(site_id: int, req: PortUpdate, user: dict = Depends(require
                      (req.port, site_id))
         _log(conn, user, "site.port",
              f"{row['domain']}: {row['port']} -> {req.port}")
+        conn.commit()
     return {"ok": True, "port": req.port}
 
 

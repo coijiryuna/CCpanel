@@ -178,6 +178,7 @@ async def app_action(site_id: int, req: Request, user: dict = Depends(require_au
         except apps_ops.AppError as e:
             raise HTTPException(500, str(e)) from e
         _log(conn, user, f"app.{action}", site["domain"])
+        conn.commit()
     return {"ok": True, "state": st["state"], "detail": st["detail"]}
 
 @app.get("/api/sites/{site_id}/apps/log")

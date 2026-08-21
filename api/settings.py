@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -80,6 +81,7 @@ def set_webserver_settings(req: WebserverSettings, user: dict = Depends(require_
             (engine,),
         )
         _log(conn, user, "settings.webserver", engine)
+        conn.commit()
     webserver_ops.set_active(engine)
     return {"ok": True, "engine": engine}
 
@@ -117,6 +119,7 @@ def set_webserver_mode(req: WebserverMode, user: dict = Depends(require_admin)) 
             (mode,),
         )
         _log(conn, user, "settings.webserver-mode", mode)
+        conn.commit()
     webserver_ops.set_mode(mode)
     return {"ok": True, "mode": mode}
 
@@ -124,6 +127,9 @@ def set_webserver_mode(req: WebserverMode, user: dict = Depends(require_admin)) 
 class DatabaseSettings(BaseModel):
     engine: str
 
+
+class CertbotEmailSettings(BaseModel):
+    email: str
 
 class FactoryResetRequest(BaseModel):
     confirm: str
@@ -150,8 +156,33 @@ def set_database_settings(req: DatabaseSettings, user: dict = Depends(require_ad
             (engine,),
         )
         _log(conn, user, "settings.database", engine)
+        conn.commit()
     database_ops.set_active(engine)
     return {"ok": True, "engine": engine}
+
+
+@app.get("/api/settings/certbot-email")
+def get_certbot_email(user: dict = Depends(require_admin)) -> dict:
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'certbot_email'").fetchone()
+    return {"email": row["value"] if row else ""}
+
+
+@app.post("/api/settings/certbot-email")
+def set_certbot_email(req: CertbotEmailSettings, user: dict = Depends(require_admin)) -> dict:
+    email = (req.email or "").strip()
+    if email and not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
+        raise HTTPException(400, "Email tidak valid")
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('certbot_email', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (email,),
+        )
+        _log(conn, user, "settings.certbot_email", email or "(kosong)")
+        conn.commit()
+    return {"ok": True, "email": email}
 
 
 @app.post("/api/settings/factory-reset")

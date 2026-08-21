@@ -134,7 +134,7 @@ def cms_install(req: CmsInstall, user: dict = Depends(require_auth)) -> dict:
                 "UPDATE sites SET php_version = ?, project_type = 'php' WHERE id = ?",
                 (php_version, site["id"]),
             )
-    conn.commit()
+        conn.commit()
     _log(None, user, "cms.install",
          f"{cms} → {domain} (db {db_name}, php {php_version}, lang {lang or 'en_US'}, v{res.get('version') or wp_version})")
     return {"ok": True, **res}

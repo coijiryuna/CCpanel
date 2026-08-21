@@ -9,17 +9,40 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sqlite3
+from pathlib import Path
 
 from . import nginx
 
-CERTBOT_EMAIL = os.environ.get("CCPANEL_CERTBOT_EMAIL", "")
 
 class CertError(Exception):
     pass
 
 
+def _get_certbot_email() -> str:
+    # Try to read from the database first
+    try:
+        BASE_DIR = Path(__file__).resolve().parent.parent
+        data_dir = Path(os.environ.get("CCPANEL_DATA_DIR", BASE_DIR / "data"))
+        db_path = data_dir / "ccpanel.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'certbot_email'"
+            ).fetchone()
+            if row:
+                return row["value"].strip()
+    except Exception:
+        pass
+    # If database doesn't have it, try environment variable
+    email = os.environ.get("CCPANEL_CERTBOT_EMAIL")
+    if email:
+        return email.strip()
+    return ""
+
+
 def _email_arg() -> list[str]:
-    email = (CERTBOT_EMAIL or "").strip()
+    email = _get_certbot_email()
     if not email:
         return ["--register-unsafely-without-email"]
     # ponytail: validasi ringan; upgrade path: email-validator kalau perlu.
@@ -44,7 +67,11 @@ def install_ssl(domain: str, extra_domains: list[str] | None = None) -> None:
     if res.returncode != 0:
         vh.write_text(backup)
         nginx.nginx_reload()
-        raise CertError(res.stderr.strip() or res.stdout.strip() or "certbot failed")
+        raise CertError(res.stderr.strip()
+                        or res.stdout.strip() or "certbot failed")
+    # Log full output for debugging
+    import logging
+    logging.info(f"certbot install output: {res.stdout}")
 
     try:
         nginx.nginx_test()
@@ -60,5 +87,6 @@ def renew_all() -> None:
     cmd = ["certbot", "renew", "--nginx", "--non-interactive"]
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
-        raise CertError(res.stderr.strip() or res.stdout.strip() or "certbot renew failed")
+        raise CertError(res.stderr.strip() or res.stdout.strip()
+                        or "certbot renew failed")
     nginx.nginx_reload()

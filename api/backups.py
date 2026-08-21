@@ -70,6 +70,7 @@ def backup_site(site_id: int, user: dict = Depends(require_admin)) -> dict:
     except backup_ops.BackupError as e:
         raise HTTPException(500, str(e)) from e
     _log(None, user, "backup.site", row["domain"])
+    conn.commit()
     return {"ok": True, "name": dest.name}
 
 
@@ -86,6 +87,7 @@ def backup_db(db_id: int, user: dict = Depends(require_admin)) -> dict:
     except backup_ops.BackupError as e:
         raise HTTPException(500, str(e)) from e
     _log(None, user, "backup.db", row["db_name"])
+    conn.commit()
     return {"ok": True, "name": dest.name}
 
 
@@ -146,5 +148,4 @@ def delete_backup(name: str, user: dict = Depends(require_admin)) -> dict:
     except OSError as e:
         raise HTTPException(500, str(e)) from e
     _log(None, user, "backup.delete", name)
-    conn.commit()
     return {"ok": True}
